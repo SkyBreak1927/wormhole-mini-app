@@ -208,6 +208,22 @@ async def home():
       #progress-bar{height:100%;width:0%;background:#4da3ff;transition:width 0.15s linear}
       #progress-text{font-size:12px;color:#999;margin-top:4px;text-align:center}
       .error-text{color:#ff6b6b;font-size:13px}
+      #help-btn{position:fixed;bottom:20px;right:20px;width:52px;height:52px;border-radius:50%;background:#4da3ff;
+        display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;
+        box-shadow:0 2px 8px rgba(0,0,0,0.4);z-index:1000}
+      #help-panel{position:fixed;bottom:84px;right:20px;width:320px;max-height:420px;background:#1a1a1c;
+        border:1px solid #333;border-radius:12px;display:none;flex-direction:column;overflow:hidden;z-index:1000}
+      #help-panel.open{display:flex}
+      #help-header{padding:12px;background:#222;font-size:14px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+      #help-close{cursor:pointer;color:#888}
+      #help-list{overflow-y:auto;padding:8px}
+      .faq-item{border-bottom:1px solid #2a2a2c}
+      .faq-q{padding:10px 6px;cursor:pointer;font-size:13px;display:flex;justify-content:space-between;align-items:center}
+      .faq-q:hover{color:#4da3ff}
+      .faq-a{padding:0 6px 10px 6px;font-size:12px;color:#aaa;line-height:1.5;display:none}
+      .faq-item.open .faq-a{display:block}
+      .faq-arrow{transition:transform 0.15s}
+      .faq-item.open .faq-arrow{transform:rotate(90deg)}
     </style></head><body>
       <h2>🌀 wormhole-mini</h2>
       <div id="drop">Drop file (bisa lebih dari 1) di sini, atau klik untuk pilih<input id="file" type="file" multiple style="display:none"></div>
@@ -226,6 +242,38 @@ async def home():
         <div id="progress-text">0%</div>
       </div>
       <div id="result"></div>
+
+      <div id="help-btn" title="Bantuan">❓</div>
+      <div id="help-panel">
+        <div id="help-header">Pertanyaan Umum <span id="help-close">&times;</span></div>
+        <div id="help-list">
+          <div class="faq-item">
+            <div class="faq-q">Cara upload file? <span class="faq-arrow">›</span></div>
+            <div class="faq-a">Drop file ke kotak di tengah halaman, atau klik kotaknya untuk pilih file dari device kamu. Bisa pilih lebih dari 1 file sekaligus.</div>
+          </div>
+          <div class="faq-item">
+            <div class="faq-q">Apa itu pilihan "tersedia selama"? <span class="faq-arrow">›</span></div>
+            <div class="faq-a">"Instan" = link mati begitu file diunduh sekali. Pilihan 15/30/45/60 menit = link tetap mati setelah diunduh sekali, TAPI juga otomatis mati kalau waktu itu habis duluan meski belum pernah diunduh.</div>
+          </div>
+          <div class="faq-item">
+            <div class="faq-q">Kenapa link saya bilang "tidak berlaku"? <span class="faq-arrow">›</span></div>
+            <div class="faq-a">Dua kemungkinan: filenya sudah pernah diunduh sekali (link cuma bisa dipakai 1x), atau waktu kadaluarsanya sudah habis.</div>
+          </div>
+          <div class="faq-item">
+            <div class="faq-q">Bagaimana cara kirim banyak file sekaligus? <span class="faq-arrow">›</span></div>
+            <div class="faq-a">Pilih/drop lebih dari 1 file di halaman utama. Nanti dapat 1 link berisi daftar semua file, tiap file bisa diunduh terpisah (tetap 1x per file).</div>
+          </div>
+          <div class="faq-item">
+            <div class="faq-q">Apakah file saya aman? <span class="faq-arrow">›</span></div>
+            <div class="faq-a">File tidak dienkripsi end-to-end dan tidak ada password — siapa pun yang pegang link bisa akses. Keamanannya mengandalkan link acak yang sangat susah ditebak. Jangan kirim file sangat sensitif lewat sini.</div>
+          </div>
+          <div class="faq-item">
+            <div class="faq-q">Berapa ukuran file maksimal? <span class="faq-arrow">›</span></div>
+            <div class="faq-a">Maksimal 500MB per file.</div>
+          </div>
+        </div>
+      </div>
+
       <script>
         const drop = document.getElementById('drop');
         const fileInput = document.getElementById('file');
@@ -267,6 +315,7 @@ async def home():
           return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             xhr.open("POST", url);
+            xhr.timeout = 180000;
 
             xhr.upload.onprogress = (e) => {
               if (e.lengthComputable) {
@@ -287,6 +336,7 @@ async def home():
               }
             };
             xhr.onerror = () => reject(new Error("Upload gagal (koneksi terputus)"));
+            xhr.ontimeout = () => reject(new Error("Upload timeout — koneksi macet, coba lagi"));
 
             xhr.send(formData);
           });
@@ -321,6 +371,18 @@ async def home():
             drop.textContent = "Drop file (bisa lebih dari 1) di sini, atau klik untuk pilih";
           }
         }
+
+        // --- FAQ widget ---
+        const helpBtn = document.getElementById('help-btn');
+        const helpPanel = document.getElementById('help-panel');
+        const helpClose = document.getElementById('help-close');
+
+        helpBtn.onclick = () => helpPanel.classList.toggle('open');
+        helpClose.onclick = () => helpPanel.classList.remove('open');
+
+        document.querySelectorAll('.faq-q').forEach(q => {
+          q.onclick = () => q.parentElement.classList.toggle('open');
+        });
       </script>
     </body></html>
     """
