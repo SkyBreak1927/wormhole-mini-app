@@ -102,9 +102,7 @@ async def pdf_merge(request: Request, files: List[UploadFile] = File(...)):
             writer.add_page(page)
 
     return pdf_response(writer, "merged.pdf")
-
-
-@router.post("/pdf/split")
+    @router.post("/pdf/split")
 async def pdf_split(request: Request, file: UploadFile = File(...), pages: str = Form(...)):
     check_pdf_rate_limit(request.client.host)
     content = await read_pdf_upload(file)
@@ -239,8 +237,24 @@ async def pdf_tools_page():
         border-radius:6px;margin-top:6px;font-size:13px}
       #tool-submit{width:100%;margin-top:16px;padding:10px;background:#4da3ff;color:#fff;border:none;
         border-radius:6px;cursor:pointer;font-size:14px}
+      #tool-submit:disabled{opacity:0.5;cursor:not-allowed}
       #tool-status{margin-top:10px;font-size:13px;text-align:center}
       a.back-link{color:#888;font-size:13px;margin-bottom:16px;text-decoration:none}
+      #merge-zone{border:2px dashed #555;border-radius:10px;padding:16px;text-align:center;cursor:pointer;
+                  font-size:13px;color:#999;margin-top:6px;transition:border-color 0.15s}
+      #merge-zone.hover{border-color:#4da3ff;color:#4da3ff}
+      #merge-file-list{margin-top:10px}
+      .merge-item{display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid #333;
+                  border-radius:6px;margin-bottom:6px;font-size:12px}
+      .merge-item span.mname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .merge-item button{padding:3px 7px;background:#222;border:1px solid #444;border-radius:5px;
+                  color:#eee;cursor:pointer;font-size:11px}
+      .merge-item button:disabled{opacity:0.3;cursor:not-allowed}
+      .merge-item button.mremove{color:#ff6b6b}
+      #tool-progress-container{width:100%;margin-top:14px;display:none}
+      #tool-progress-bar-bg{width:100%;height:8px;background:#222;border-radius:4px;overflow:hidden}
+      #tool-progress-bar{height:100%;width:0%;background:#4da3ff;transition:width 0.15s linear}
+      #tool-progress-text{font-size:12px;color:#999;margin-top:4px;text-align:center}
     </style></head><body>
       <a href="/" class="back-link">← Kembali</a>
       <h2>🛠️ PDF Tools</h2>
@@ -256,16 +270,16 @@ async def pdf_tools_page():
 
       <div id="tool-form">
         <div id="form-fields"></div>
+        <div id="tool-progress-container">
+          <div id="tool-progress-bar-bg"><div id="tool-progress-bar"></div></div>
+          <div id="tool-progress-text">0%</div>
+        </div>
         <button id="tool-submit">Proses & Download</button>
         <div id="tool-status"></div>
       </div>
 
       <script>
-        const TOOLS = {
-          merge: {
-            endpoint: '/pdf/merge', filename: 'merged.pdf',
-            fields: '<label>Pilih 2+ file PDF</label><input type="file" name="files" accept="application/pdf" multiple>'
-          },
+        const SIMPLE_TOOLS = {
           split: {
             endpoint: '/pdf/split', filename: 'extracted.pdf',
             fields: '<label>File PDF</label><input type="file" name="file" accept="application/pdf">' +
@@ -298,62 +312,180 @@ async def pdf_tools_page():
           }
         };
 
+        const MERGE_FIELDS_HTML =
+          '<label>Tambahkan file PDF (urutan menentukan hasil merge)</label>' +
+          '<div id="merge-zone">Klik atau drop file PDF di sini<input id="merge-file-input" type="file" accept="application/pdf" multiple style="display:none"></div>' +
+          '<div id="merge-file-list"></div>';
+
         let activeTool = null;
+        let mergeFiles = [];
+
         const toolForm = document.getElementById('tool-form');
         const formFields = document.getElementById('form-fields');
         const toolStatus = document.getElementById('tool-status');
         const toolSubmit = document.getElementById('tool-submit');
+        const progressContainer = document.getElementById('tool-progress-container');
+        const progressBar = document.getElementById('tool-progress-bar');
+        const progressText = document.getElementById('tool-progress-text');
+
+        function renderMergeList() {
+          const listEl = document.getElementById('merge-file-list');
+          if (!listEl) return;
+          listEl.innerHTML = mergeFiles.map((f, i) => `
+            <div class="merge-item">
+              <span class="mname">${i + 1}. ${f.name}</span>
+              <button type="button" data-action="up" data-idx="${i}" ${i === 0 ? 'disabled' : ''}>↑</button>
+              <button type="button" data-action="down" data-idx="${i}" ${i === mergeFiles.length - 1 ? 'disabled' : ''}>↓</button>
+              <button type="button" class="mremove" data-action="remove" data-idx="${i}">✕</button>
+            </div>
+          `).join('');
+
+          listEl.querySelectorAll('button').forEach(btn => {
+            btn.onclick = () => {
+              const idx = parseInt(btn.dataset.idx);
+              const action = btn.dataset.action;
+              if (action === 'up' && idx > 0) {
+                [mergeFiles[idx - 1], mergeFiles[idx]] = [mergeFiles[idx], mergeFiles[idx - 1]];
+              } else if (action === 'down' && idx < mergeFiles.length - 1) {
+                [mergeFiles[idx + 1], mergeFiles[idx]] = [mergeFiles[idx], mergeFiles[idx + 1]];
+              } else if (action === 'remove') {
+                mergeFiles.splice(idx, 1);
+              }
+              renderMergeList();
+            };
+          });
+        }
+
+        function setupMergeZone() {
+          const zone = document.getElementById('merge-zone');
+          const input = document.getElementById('merge-file-input');
+          if (!zone || !input) return;
+
+          zone.onclick = () => input.click();
+          input.onchange = () => {
+            for (const f of input.files) mergeFiles.push(f);
+            input.value = '';
+            renderMergeList();
+          };
+          zone.ondragover = e => { e.preventDefault(); zone.classList.add('hover'); };
+          zone.ondragleave = () => zone.classList.remove('hover');
+          zone.ondrop = e => {
+            e.preventDefault();
+            zone.classList.remove('hover');
+            for (const f of e.dataTransfer.files) {
+              if (f.type === 'application/pdf') mergeFiles.push(f);
+            }
+            renderMergeList();
+          };
+        }
 
         document.querySelectorAll('.tool-card').forEach(card => {
           card.onclick = () => {
             document.querySelectorAll('.tool-card').forEach(c => c.classList.remove('active'));
             card.classList.add('active');
             activeTool = card.dataset.tool;
-            formFields.innerHTML = TOOLS[activeTool].fields;
-            toolForm.classList.add('open');
             toolStatus.textContent = '';
+            progressContainer.style.display = 'none';
+
+            if (activeTool === 'merge') {
+              mergeFiles = [];
+              formFields.innerHTML = MERGE_FIELDS_HTML;
+              setupMergeZone();
+              renderMergeList();
+            } else {
+              formFields.innerHTML = SIMPLE_TOOLS[activeTool].fields;
+            }
+            toolForm.classList.add('open');
           };
         });
 
+        function updateProgress(percent, label) {
+          progressContainer.style.display = 'block';
+          progressBar.style.width = percent + '%';
+          progressText.textContent = label || (percent + '%');
+        }
+
+        function submitWithProgress(url, formData) {
+          return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', url);
+            xhr.responseType = 'blob';
+            xhr.timeout = 180000;
+
+            xhr.upload.onprogress = (e) => {
+              if (e.lengthComputable) {
+                const percent = Math.round((e.loaded / e.total) * 100);
+                updateProgress(percent, percent < 100 ? ('Mengupload... ' + percent + '%') : 'Memproses di server...');
+              }
+            };
+
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                resolve(xhr.response);
+              } else {
+                const reader = new FileReader();
+                reader.onload = () => {
+                  try {
+                    const data = JSON.parse(reader.result);
+                    reject(new Error(data.detail || 'Gagal memproses PDF'));
+                  } catch (e) {
+                    reject(new Error('Gagal memproses PDF'));
+                  }
+                };
+                reader.onerror = () => reject(new Error('Gagal memproses PDF'));
+                reader.readAsText(xhr.response);
+              }
+            };
+            xhr.onerror = () => reject(new Error('Koneksi terputus'));
+            xhr.ontimeout = () => reject(new Error('Timeout, koneksi macet — coba lagi'));
+
+            xhr.send(formData);
+          });
+        }
+
         toolSubmit.onclick = async () => {
           if (!activeTool) return;
-          const tool = TOOLS[activeTool];
+
           const form = new FormData();
-          let hasFile = false;
+          let endpoint, filename;
 
-          formFields.querySelectorAll('input, select').forEach(el => {
-            if (el.type === 'file') {
-              if (el.multiple) {
-                for (const f of el.files) { form.append(el.name, f); hasFile = true; }
-              } else if (el.files[0]) {
-                form.append(el.name, el.files[0]); hasFile = true;
-              }
-            } else {
-              form.append(el.name, el.value);
+          if (activeTool === 'merge') {
+            if (mergeFiles.length < 2) {
+              toolStatus.textContent = 'Tambahkan minimal 2 file PDF.';
+              toolStatus.style.color = '#ff6b6b';
+              return;
             }
-          });
-
-          if (!hasFile) {
-            toolStatus.textContent = 'Pilih file PDF dulu.';
-            toolStatus.style.color = '#ff6b6b';
-            return;
+            mergeFiles.forEach(f => form.append('files', f));
+            endpoint = '/pdf/merge';
+            filename = 'merged.pdf';
+          } else {
+            const tool = SIMPLE_TOOLS[activeTool];
+            let hasFile = false;
+            formFields.querySelectorAll('input, select').forEach(el => {
+              if (el.type === 'file') {
+                if (el.files[0]) { form.append(el.name, el.files[0]); hasFile = true; }
+              } else {
+                form.append(el.name, el.value);
+              }
+            });
+            if (!hasFile) {
+              toolStatus.textContent = 'Pilih file PDF dulu.';
+              toolStatus.style.color = '#ff6b6b';
+              return;
+            }
+            endpoint = tool.endpoint;
+            filename = tool.filename;
           }
 
           toolSubmit.disabled = true;
-          toolStatus.textContent = 'Memproses...';
-          toolStatus.style.color = '#999';
+          toolStatus.textContent = '';
+          updateProgress(0, 'Mengupload... 0%');
 
           try {
-            const res = await fetch(tool.endpoint, { method: 'POST', body: form });
-            if (!res.ok) {
-              let msg = 'Gagal memproses PDF';
-              try { const data = await res.json(); msg = data.detail || msg; } catch (e) {}
-              throw new Error(msg);
-            }
-            const blob = await res.blob();
+            const blob = await submitWithProgress(endpoint, form);
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = url; a.download = tool.filename;
+            a.href = url; a.download = filename;
             document.body.appendChild(a); a.click(); a.remove();
             URL.revokeObjectURL(url);
             toolStatus.textContent = '✓ Selesai, file terunduh.';
@@ -363,6 +495,7 @@ async def pdf_tools_page():
             toolStatus.style.color = '#ff6b6b';
           } finally {
             toolSubmit.disabled = false;
+            progressContainer.style.display = 'none';
           }
         };
       </script>
