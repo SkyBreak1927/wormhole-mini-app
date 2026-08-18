@@ -4,8 +4,10 @@ from collections import defaultdict
 from fastapi import FastAPI, UploadFile, File, Request, HTTPException, Form
 from fastapi.responses import FileResponse, HTMLResponse
 from starlette.background import BackgroundTask
+from pdf_tools import router as pdf_router
 
 app = FastAPI()
+app.include_router(pdf_router)
 
 STORAGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage")
 os.makedirs(STORAGE_DIR, exist_ok=True)
@@ -226,6 +228,7 @@ async def home():
       .faq-item.open .faq-arrow{transform:rotate(90deg)}
     </style></head><body>
       <h2>🌀 wormhole-mini</h2>
+      <a href="/pdf-tools" style="color:#4da3ff;font-size:13px;margin-bottom:14px;text-decoration:none">🛠️ Buka PDF Tools →</a>
       <div id="drop">Drop file (bisa lebih dari 1) di sini, atau klik untuk pilih<input id="file" type="file" multiple style="display:none"></div>
       <div id="expiry-wrap">
         <label for="expiry">Link tersedia selama</label>
