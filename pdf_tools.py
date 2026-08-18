@@ -1,4 +1,4 @@
-import io, time
+import io, time, json
 from collections import defaultdict
 from typing import List
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
@@ -119,16 +119,29 @@ async def pdf_split(request: Request, file: UploadFile = File(...), pages: str =
 
 
 @router.post("/pdf/rotate")
-async def pdf_rotate(request: Request, file: UploadFile = File(...), angle: int = Form(...)):
+async def pdf_rotate(request: Request, file: UploadFile = File(...), angles: str = Form(...)):
     check_pdf_rate_limit(request.client.host)
-    if angle not in (90, 180, 270):
-        raise HTTPException(status_code=400, detail="Sudut rotasi harus 90, 180, atau 270.")
     content = await read_pdf_upload(file)
     reader = safe_read_pdf(content)
 
+    try:
+        angle_map = json.loads(angles)
+        if not isinstance(angle_map, dict):
+            raise ValueError
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Data rotasi tidak valid.")
+
     writer = PdfWriter()
-    for page in reader.pages:
-        page.rotate(angle)
+    for i, page in enumerate(reader.pages):
+        raw_angle = angle_map.get(str(i), 0)
+        try:
+            angle = int(raw_angle)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail=f"Sudut rotasi halaman {i + 1} tidak valid.")
+        if angle not in (0, 90, 180, 270):
+            raise HTTPException(status_code=400, detail=f"Sudut rotasi halaman {i + 1} harus 0, 90, 180, atau 270.")
+        if angle:
+            page.rotate(angle)
         writer.add_page(page)
 
     return pdf_response(writer, "rotated.pdf")
@@ -228,7 +241,7 @@ async def pdf_tools_page():
       .tool-card:hover{border-color:#4da3ff}
       .tool-card.active{border-color:#4da3ff;background:#1a1a1c}
       .tool-icon{font-size:26px;display:block;margin-bottom:6px}
-      #tool-form{width:100%;max-width:400px;margin-top:20px;display:none}
+      #tool-form{width:100%;max-width:520px;margin-top:20px;display:none}
       #tool-form.open{display:block}
       #tool-form input[type=text],#tool-form input[type=number],#tool-form input[type=password]{
         width:100%;padding:8px;background:#1a1a1c;color:#eee;border:1px solid #444;border-radius:6px;
@@ -242,9 +255,9 @@ async def pdf_tools_page():
       #tool-submit:disabled{opacity:0.5;cursor:not-allowed}
       #tool-status{margin-top:10px;font-size:13px;text-align:center}
       a.back-link{color:#888;font-size:13px;margin-bottom:16px;text-decoration:none}
-      #merge-zone{border:2px dashed #555;border-radius:10px;padding:16px;text-align:center;cursor:pointer;
+      #merge-zone,#rotate-zone{border:2px dashed #555;border-radius:10px;padding:16px;text-align:center;cursor:pointer;
                   font-size:13px;color:#999;margin-top:6px;transition:border-color 0.15s}
-      #merge-zone.hover{border-color:#4da3ff;color:#4da3ff}
+      #merge-zone.hover,#rotate-zone.hover{border-color:#4da3ff;color:#4da3ff}
       #merge-file-list{margin-top:10px}
       .merge-item{display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid #333;
                   border-radius:6px;margin-bottom:6px;font-size:12px}
@@ -253,6 +266,16 @@ async def pdf_tools_page():
                   color:#eee;cursor:pointer;font-size:11px}
       .merge-item button:disabled{opacity:0.3;cursor:not-allowed}
       .merge-item button.mremove{color:#ff6b6b}
+      #rotate-thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:10px;margin-top:12px}
+      .rotate-thumb{position:relative;border:1px solid #333;border-radius:8px;padding:8px 6px;text-align:center;
+                    background:#1a1a1c;overflow:hidden}
+      .rotate-thumb canvas{max-width:100%;height:auto;transition:transform 0.2s ease;display:block;margin:0 auto}
+      .rotate-thumb-label{font-size:10px;color:#888;margin-top:6px}
+      .rotate-thumb-btn{position:absolute;top:5px;right:5px;width:24px;height:24px;border-radius:50%;
+        background:#4da3ff;color:#fff;border:none;cursor:pointer;font-size:14px;line-height:1;
+        display:flex;align-items:center;justify-content:center}
+      .rotate-thumb-btn:hover{background:#6db4ff}
+      #rotate-note{grid-column:1/-1;font-size:11px;color:#888;margin-top:4px}
       #tool-progress-container{width:100%;margin-top:14px;display:none}
       #tool-progress-bar-bg{width:100%;height:8px;background:#222;border-radius:4px;overflow:hidden}
       #tool-progress-bar{height:100%;width:0%;background:#4da3ff;transition:width 0.15s linear}
@@ -280,17 +303,23 @@ async def pdf_tools_page():
         <div id="tool-status"></div>
       </div>
 
+      <script type="module">
+        import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
+        window.pdfjsLib = pdfjsLib;
+        window.dispatchEvent(new Event('pdfjs-ready'));
+      </script>
+
       <script>
+        const pdfjsReady = window.pdfjsLib
+          ? Promise.resolve()
+          : new Promise(resolve => window.addEventListener('pdfjs-ready', resolve, { once: true }));
+
         const SIMPLE_TOOLS = {
           split: {
             endpoint: '/pdf/split', filename: 'extracted.pdf',
             fields: '<label>File PDF</label><input type="file" name="file" accept="application/pdf">' +
                     '<label>Halaman yang diambil (contoh: 1-3,5,7-9)</label><input type="text" name="pages" placeholder="1-3,5">'
-          },
-          rotate: {
-            endpoint: '/pdf/rotate', filename: 'rotated.pdf',
-            fields: '<label>File PDF</label><input type="file" name="file" accept="application/pdf">' +
-                    '<label>Sudut rotasi</label><select name="angle"><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select>'
           },
           delete: {
             endpoint: '/pdf/delete-pages', filename: 'edited.pdf',
@@ -319,8 +348,18 @@ async def pdf_tools_page():
           '<div id="merge-zone">Klik atau drop file PDF di sini<input id="merge-file-input" type="file" accept="application/pdf" multiple style="display:none"></div>' +
           '<div id="merge-file-list"></div>';
 
+        const ROTATE_FIELDS_HTML =
+          '<label>Pilih file PDF, lalu klik ikon \u21bb di tiap halaman untuk memutar</label>' +
+          '<div id="rotate-zone">Klik atau drop file PDF di sini<input id="rotate-file-input" type="file" accept="application/pdf" style="display:none"></div>' +
+          '<div id="rotate-thumbs"></div>';
+
+        const MAX_PREVIEW_PAGES = 30;
+
         let activeTool = null;
         let mergeFiles = [];
+        let rotateFile = null;
+        let pageAngles = {};
+        let rotatePageCount = 0;
 
         const toolForm = document.getElementById('tool-form');
         const formFields = document.getElementById('form-fields');
@@ -381,6 +420,86 @@ async def pdf_tools_page():
           };
         }
 
+        async function loadRotateFile(file) {
+          rotateFile = file;
+          pageAngles = {};
+          const thumbsEl = document.getElementById('rotate-thumbs');
+          if (!thumbsEl) return;
+          thumbsEl.innerHTML = '<p style="grid-column:1/-1;font-size:12px;color:#999">Memuat preview halaman...</p>';
+
+          try {
+            await pdfjsReady;
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            rotatePageCount = pdf.numPages;
+            const previewCount = Math.min(rotatePageCount, MAX_PREVIEW_PAGES);
+
+            thumbsEl.innerHTML = '';
+            for (let i = 1; i <= previewCount; i++) {
+              const page = await pdf.getPage(i);
+              const viewport = page.getViewport({ scale: 0.3 });
+              const canvas = document.createElement('canvas');
+              canvas.width = viewport.width;
+              canvas.height = viewport.height;
+              const ctx = canvas.getContext('2d');
+              await page.render({ canvasContext: ctx, viewport }).promise;
+
+              const wrap = document.createElement('div');
+              wrap.className = 'rotate-thumb';
+              wrap.dataset.page = String(i - 1);
+              wrap.appendChild(canvas);
+
+              const label = document.createElement('div');
+              label.className = 'rotate-thumb-label';
+              label.textContent = 'Hal. ' + i;
+              wrap.appendChild(label);
+
+              const btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = 'rotate-thumb-btn';
+              btn.title = 'Putar 90°';
+              btn.textContent = '↻';
+              btn.onclick = () => {
+                const idx = parseInt(wrap.dataset.page);
+                const current = pageAngles[idx] || 0;
+                const next = (current + 90) % 360;
+                pageAngles[idx] = next;
+                canvas.style.transform = 'rotate(' + next + 'deg)';
+              };
+              wrap.appendChild(btn);
+
+              thumbsEl.appendChild(wrap);
+            }
+
+            if (rotatePageCount > MAX_PREVIEW_PAGES) {
+              const note = document.createElement('p');
+              note.id = 'rotate-note';
+              note.textContent = 'Preview dibatasi ' + MAX_PREVIEW_PAGES + ' halaman pertama (dokumen ini ' +
+                rotatePageCount + ' halaman). Halaman setelahnya tidak diputar.';
+              thumbsEl.appendChild(note);
+            }
+          } catch (err) {
+            thumbsEl.innerHTML = '<p style="grid-column:1/-1;font-size:12px;color:#ff6b6b">Gagal memuat preview PDF.</p>';
+          }
+        }
+
+        function setupRotateZone() {
+          const zone = document.getElementById('rotate-zone');
+          const input = document.getElementById('rotate-file-input');
+          if (!zone || !input) return;
+
+          zone.onclick = () => input.click();
+          input.onchange = () => { if (input.files[0]) loadRotateFile(input.files[0]); };
+          zone.ondragover = e => { e.preventDefault(); zone.classList.add('hover'); };
+          zone.ondragleave = () => zone.classList.remove('hover');
+          zone.ondrop = e => {
+            e.preventDefault();
+            zone.classList.remove('hover');
+            const f = e.dataTransfer.files[0];
+            if (f && f.type === 'application/pdf') loadRotateFile(f);
+          };
+        }
+
         document.querySelectorAll('.tool-card').forEach(card => {
           card.onclick = () => {
             document.querySelectorAll('.tool-card').forEach(c => c.classList.remove('active'));
@@ -394,6 +513,11 @@ async def pdf_tools_page():
               formFields.innerHTML = MERGE_FIELDS_HTML;
               setupMergeZone();
               renderMergeList();
+            } else if (activeTool === 'rotate') {
+              rotateFile = null;
+              pageAngles = {};
+              formFields.innerHTML = ROTATE_FIELDS_HTML;
+              setupRotateZone();
             } else {
               formFields.innerHTML = SIMPLE_TOOLS[activeTool].fields;
             }
@@ -460,6 +584,16 @@ async def pdf_tools_page():
             mergeFiles.forEach(f => form.append('files', f));
             endpoint = '/pdf/merge';
             filename = 'merged.pdf';
+          } else if (activeTool === 'rotate') {
+            if (!rotateFile) {
+              toolStatus.textContent = 'Pilih file PDF dulu.';
+              toolStatus.style.color = '#ff6b6b';
+              return;
+            }
+            form.append('file', rotateFile);
+            form.append('angles', JSON.stringify(pageAngles));
+            endpoint = '/pdf/rotate';
+            filename = 'rotated.pdf';
           } else {
             const tool = SIMPLE_TOOLS[activeTool];
             let hasFile = false;
