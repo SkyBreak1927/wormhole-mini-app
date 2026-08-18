@@ -102,7 +102,9 @@ async def pdf_merge(request: Request, files: List[UploadFile] = File(...)):
             writer.add_page(page)
 
     return pdf_response(writer, "merged.pdf")
-    @router.post("/pdf/split")
+
+
+@router.post("/pdf/split")
 async def pdf_split(request: Request, file: UploadFile = File(...), pages: str = Form(...)):
     check_pdf_rate_limit(request.client.host)
     content = await read_pdf_upload(file)
@@ -483,6 +485,7 @@ async def pdf_tools_page():
 
           try {
             const blob = await submitWithProgress(endpoint, form);
+            updateProgress(100, '✓ Selesai');
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url; a.download = filename;
@@ -490,12 +493,13 @@ async def pdf_tools_page():
             URL.revokeObjectURL(url);
             toolStatus.textContent = '✓ Selesai, file terunduh.';
             toolStatus.style.color = '#4dff88';
+            setTimeout(() => { progressContainer.style.display = 'none'; }, 800);
           } catch (err) {
             toolStatus.textContent = err.message;
             toolStatus.style.color = '#ff6b6b';
+            progressContainer.style.display = 'none';
           } finally {
             toolSubmit.disabled = false;
-            progressContainer.style.display = 'none';
           }
         };
       </script>
