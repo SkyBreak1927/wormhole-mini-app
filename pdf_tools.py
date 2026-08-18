@@ -195,12 +195,61 @@ async def pdf_unlock(request: Request, file: UploadFile = File(...), password: s
     return pdf_response(writer, "unlocked.pdf")
 
 
+WATERMARK_POSITIONS = {
+    "top-left", "top-center", "top-right",
+    "middle-left", "center", "middle-right",
+    "bottom-left", "bottom-center", "bottom-right",
+}
+WATERMARK_MARGIN = 50
+
+
+def watermark_xy(position: str, w: float, h: float):
+    m = WATERMARK_MARGIN
+    return {
+        "top-left": (m, h - m),
+        "top-center": (w / 2, h - m),
+        "top-right": (w - m, h - m),
+        "middle-left": (m, h / 2),
+        "center": (w / 2, h / 2),
+        "middle-right": (w - m, h / 2),
+        "bottom-left": (m, m),
+        "bottom-center": (w / 2, m),
+        "bottom-right": (w - m, m),
+    }[position]
+
+
+def parse_hex_color(color: str):
+    color = (color or "").strip().lstrip("#")
+    if len(color) != 6:
+        raise HTTPException(status_code=400, detail="Format warna tidak valid, pakai kode hex (contoh: #808080).")
+    try:
+        r = int(color[0:2], 16) / 255
+        g = int(color[2:4], 16) / 255
+        b = int(color[4:6], 16) / 255
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Format warna tidak valid, pakai kode hex (contoh: #808080).")
+    return r, g, b
+
+
 @router.post("/pdf/watermark")
-async def pdf_watermark(request: Request, file: UploadFile = File(...), text: str = Form(...)):
+async def pdf_watermark(
+    request: Request,
+    file: UploadFile = File(...),
+    text: str = Form(...),
+    position: str = Form("center"),
+    font_size: int = Form(40),
+    color: str = Form("#808080"),
+):
     check_pdf_rate_limit(request.client.host)
     text = text.strip()[:100]
     if not text:
         raise HTTPException(status_code=400, detail="Teks watermark tidak boleh kosong.")
+    if position not in WATERMARK_POSITIONS:
+        raise HTTPException(status_code=400, detail="Posisi watermark tidak valid.")
+    if font_size < 8 or font_size > 200:
+        raise HTTPException(status_code=400, detail="Ukuran font harus antara 8-200.")
+    r, g, b = parse_hex_color(color)
+
     content = await read_pdf_upload(file)
     reader = safe_read_pdf(content)
 
@@ -208,14 +257,16 @@ async def pdf_watermark(request: Request, file: UploadFile = File(...), text: st
     for page in reader.pages:
         w = float(page.mediabox.width)
         h = float(page.mediabox.height)
+        x, y = watermark_xy(position, w, h)
 
         wm_buf = io.BytesIO()
         c = canvas.Canvas(wm_buf, pagesize=(w, h))
         c.saveState()
-        c.setFont("Helvetica-Bold", 40)
-        c.setFillColorRGB(0.5, 0.5, 0.5, alpha=0.3)
-        c.translate(w / 2, h / 2)
-        c.rotate(45)
+        c.setFont("Helvetica-Bold", font_size)
+        c.setFillColorRGB(r, g, b, alpha=0.4)
+        c.translate(x, y)
+        if position == "center":
+            c.rotate(45)
         c.drawCentredString(0, 0, text)
         c.restoreState()
         c.save()
@@ -280,6 +331,17 @@ async def pdf_tools_page():
       #tool-progress-bar-bg{width:100%;height:8px;background:#222;border-radius:4px;overflow:hidden}
       #tool-progress-bar{height:100%;width:0%;background:#4da3ff;transition:width 0.15s linear}
       #tool-progress-text{font-size:12px;color:#999;margin-top:4px;text-align:center}
+      .pos-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px;width:140px}
+      .pos-btn{aspect-ratio:1;border:1px solid #444;border-radius:6px;background:#1a1a1c;cursor:pointer}
+      .pos-btn.active{border-color:#4da3ff;background:#2a3a4a}
+      .pos-btn:hover{border-color:#4da3ff}
+      input[type=color]{width:50px;height:32px;padding:2px;margin-top:6px;border:1px solid #444;
+        border-radius:6px;background:#1a1a1c;cursor:pointer}
+      .pw-wrap{position:relative;margin-top:6px}
+      .pw-wrap input{width:100%;padding:8px 36px 8px 8px;background:#1a1a1c;color:#eee;
+        border:1px solid #444;border-radius:6px;box-sizing:border-box;font-size:13px}
+      .pw-toggle{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;
+        border:none;cursor:pointer;font-size:15px;padding:4px;margin:0}
     </style></head><body>
       <a href="/" class="back-link">← Kembali</a>
       <h2>🛠️ PDF Tools</h2>
@@ -315,6 +377,9 @@ async def pdf_tools_page():
           ? Promise.resolve()
           : new Promise(resolve => window.addEventListener('pdfjs-ready', resolve, { once: true }));
 
+        const PW_TOGGLE_HTML =
+          '<button type="button" class="pw-toggle" title="Lihat/sembunyikan password">👁️</button>';
+
         const SIMPLE_TOOLS = {
           split: {
             endpoint: '/pdf/split', filename: 'extracted.pdf',
@@ -329,17 +394,27 @@ async def pdf_tools_page():
           protect: {
             endpoint: '/pdf/protect', filename: 'protected.pdf',
             fields: '<label>File PDF</label><input type="file" name="file" accept="application/pdf">' +
-                    '<label>Password baru</label><input type="password" name="password" placeholder="Min. 4 karakter">'
+                    '<label>Password baru</label>' +
+                    '<div class="pw-wrap"><input type="password" name="password" placeholder="Min. 4 karakter">' + PW_TOGGLE_HTML + '</div>'
           },
           unlock: {
             endpoint: '/pdf/unlock', filename: 'unlocked.pdf',
             fields: '<label>File PDF (terkunci)</label><input type="file" name="file" accept="application/pdf">' +
-                    '<label>Password saat ini</label><input type="password" name="password">'
+                    '<label>Password saat ini</label>' +
+                    '<div class="pw-wrap"><input type="password" name="password">' + PW_TOGGLE_HTML + '</div>'
           },
           watermark: {
             endpoint: '/pdf/watermark', filename: 'watermarked.pdf',
             fields: '<label>File PDF</label><input type="file" name="file" accept="application/pdf">' +
-                    '<label>Teks watermark</label><input type="text" name="text" placeholder="Contoh: CONFIDENTIAL">'
+                    '<label>Teks watermark</label><input type="text" name="text" placeholder="Contoh: CONFIDENTIAL">' +
+                    '<label>Posisi watermark</label>' +
+                    '<div class="pos-grid">' +
+                      ['top-left','top-center','top-right','middle-left','center','middle-right','bottom-left','bottom-center','bottom-right']
+                        .map(p => `<button type="button" class="pos-btn${p === 'center' ? ' active' : ''}" data-pos="${p}"></button>`).join('') +
+                    '</div>' +
+                    '<input type="hidden" name="position" value="center">' +
+                    '<label>Ukuran font</label><input type="number" name="font_size" value="40" min="8" max="200">' +
+                    '<label>Warna</label><input type="color" name="color" value="#808080">'
           }
         };
 
@@ -520,9 +595,35 @@ async def pdf_tools_page():
               setupRotateZone();
             } else {
               formFields.innerHTML = SIMPLE_TOOLS[activeTool].fields;
+              if (activeTool === 'watermark') setupPositionGrid();
             }
             toolForm.classList.add('open');
           };
+        });
+
+        function setupPositionGrid() {
+          const hiddenInput = formFields.querySelector('input[name="position"]');
+          formFields.querySelectorAll('.pos-btn').forEach(btn => {
+            btn.onclick = () => {
+              formFields.querySelectorAll('.pos-btn').forEach(b => b.classList.remove('active'));
+              btn.classList.add('active');
+              if (hiddenInput) hiddenInput.value = btn.dataset.pos;
+            };
+          });
+        }
+
+        // Password show/hide toggle, works for any .pw-toggle button added now or later
+        formFields.addEventListener('click', (e) => {
+          const btn = e.target.closest('.pw-toggle');
+          if (!btn) return;
+          const input = btn.closest('.pw-wrap').querySelector('input');
+          if (input.type === 'password') {
+            input.type = 'text';
+            btn.style.opacity = '0.6';
+          } else {
+            input.type = 'password';
+            btn.style.opacity = '1';
+          }
         });
 
         function updateProgress(percent, label) {
