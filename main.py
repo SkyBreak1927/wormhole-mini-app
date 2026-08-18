@@ -25,6 +25,8 @@ ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
 MAX_SCREENSHOT_SIZE = 10 * 1024 * 1024  # 10 MB
 REPORT_RATE_LIMIT = 5
 REPORT_RATE_WINDOW = 300             # 5 menit
+REPORT_MAX_AGE = 30 * 24 * 60 * 60   # laporan otomatis dihapus setelah 30 hari
+REPORT_CLEANUP_INTERVAL = 3600       # cek tiap 1 jam
 
 FILES = {}
 BATCHES = {}
@@ -98,9 +100,28 @@ async def cleanup_expired_loop():
         await asyncio.sleep(CLEANUP_INTERVAL)
 
 
+def prune_old_reports():
+    now = time.time()
+    keep = []
+    for r in REPORTS:
+        if now - r["timestamp"] > REPORT_MAX_AGE:
+            if r["screenshot_path"] and os.path.exists(r["screenshot_path"]):
+                os.remove(r["screenshot_path"])
+        else:
+            keep.append(r)
+    REPORTS[:] = keep
+
+
+async def cleanup_old_reports_loop():
+    while True:
+        prune_old_reports()
+        await asyncio.sleep(REPORT_CLEANUP_INTERVAL)
+
+
 @app.on_event("startup")
 async def start_cleanup():
     asyncio.create_task(cleanup_expired_loop())
+    asyncio.create_task(cleanup_old_reports_loop())
 
 
 @app.post("/upload")
