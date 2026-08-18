@@ -1,10 +1,13 @@
-import io, time, json
+import io, time, json, zipfile, tempfile, os
 from collections import defaultdict
 from typing import List
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
+import pymupdf
+from PIL import Image
+from pdf2docx import Converter
 
 router = APIRouter()
 
@@ -279,6 +282,113 @@ async def pdf_watermark(
     return pdf_response(writer, "watermarked.pdf")
 
 
+PDF_TO_JPG_MAX_PAGES = 30
+IMAGE_TO_PDF_MAX_FILES = 30
+CONVERT_MAX_SIZE = 30 * 1024 * 1024  # 30 MB, konversi lebih berat dari operasi PDF biasa
+
+
+@router.post("/pdf/to-jpg")
+async def pdf_to_jpg(request: Request, file: UploadFile = File(...)):
+    check_pdf_rate_limit(request.client.host)
+    content = await read_pdf_upload(file)
+    if len(content) > CONVERT_MAX_SIZE:
+        raise HTTPException(status_code=413, detail=f"File melebihi batas {CONVERT_MAX_SIZE // (1024*1024)}MB untuk konversi.")
+
+    try:
+        doc = pymupdf.open(stream=content, filetype="pdf")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Gagal membaca PDF, file mungkin rusak.")
+
+    if doc.page_count > PDF_TO_JPG_MAX_PAGES:
+        doc.close()
+        raise HTTPException(status_code=400, detail=f"Maks {PDF_TO_JPG_MAX_PAGES} halaman untuk konversi ke JPG.")
+
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for i in range(doc.page_count):
+            page = doc[i]
+            pix = page.get_pixmap(dpi=150)
+            zf.writestr(f"page_{i + 1}.jpg", pix.tobytes("jpg"))
+    doc.close()
+    zip_buf.seek(0)
+
+    return StreamingResponse(
+        zip_buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="pdf_to_jpg.zip"'},
+    )
+
+
+@router.post("/image/to-pdf")
+async def image_to_pdf(request: Request, images: List[UploadFile] = File(...)):
+    check_pdf_rate_limit(request.client.host)
+    if not images:
+        raise HTTPException(status_code=400, detail="Pilih minimal 1 gambar.")
+    if len(images) > IMAGE_TO_PDF_MAX_FILES:
+        raise HTTPException(status_code=400, detail=f"Maks {IMAGE_TO_PDF_MAX_FILES} gambar sekaligus.")
+
+    pil_images = []
+    for img_file in images:
+        content = await img_file.read()
+        if len(content) > CONVERT_MAX_SIZE:
+            raise HTTPException(status_code=413, detail=f"{img_file.filename} melebihi batas {CONVERT_MAX_SIZE // (1024*1024)}MB.")
+        try:
+            im = Image.open(io.BytesIO(content))
+            im = im.convert("RGB")
+            pil_images.append(im)
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"{img_file.filename} bukan file gambar yang valid.")
+
+    output = io.BytesIO()
+    pil_images[0].save(output, format="PDF", save_all=True, append_images=pil_images[1:])
+    output.seek(0)
+
+    return StreamingResponse(
+        output,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="images_to_pdf.pdf"'},
+    )
+
+
+@router.post("/pdf/to-word")
+async def pdf_to_word(request: Request, file: UploadFile = File(...)):
+    check_pdf_rate_limit(request.client.host)
+    content = await read_pdf_upload(file)
+    if len(content) > CONVERT_MAX_SIZE:
+        raise HTTPException(status_code=413, detail=f"File melebihi batas {CONVERT_MAX_SIZE // (1024*1024)}MB untuk konversi.")
+
+    tmp_in_path = None
+    tmp_out_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_in:
+            tmp_in.write(content)
+            tmp_in_path = tmp_in.name
+        tmp_out_path = tmp_in_path[:-4] + ".docx"
+
+        cv = Converter(tmp_in_path)
+        cv.convert(tmp_out_path)
+        cv.close()
+
+        with open(tmp_out_path, "rb") as f:
+            result_bytes = f.read()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="Gagal mengonversi PDF ini ke Word. Coba file lain atau layout yang lebih sederhana.")
+    finally:
+        if tmp_in_path and os.path.exists(tmp_in_path):
+            os.remove(tmp_in_path)
+        if tmp_out_path and os.path.exists(tmp_out_path):
+            os.remove(tmp_out_path)
+
+    output = io.BytesIO(result_bytes)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": 'attachment; filename="converted.docx"'},
+    )
+
+
 @router.get("/pdf-tools", response_class=HTMLResponse)
 async def pdf_tools_page():
     return """
@@ -342,17 +452,35 @@ async def pdf_tools_page():
         border:1px solid #444;border-radius:6px;box-sizing:border-box;font-size:13px}
       .pw-toggle{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;
         border:none;cursor:pointer;font-size:15px;padding:4px;margin:0}
+      .cat-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;justify-content:center}
+      .cat-tab{padding:7px 16px;border-radius:20px;border:1px solid #444;background:#1a1a1c;
+        color:#ccc;font-size:13px;cursor:pointer;white-space:nowrap}
+      .cat-tab:hover{border-color:#4da3ff}
+      .cat-tab.active{background:#4da3ff;border-color:#4da3ff;color:#fff}
+      .tool-card{display:flex}
+      .tool-card.hidden{display:none}
+      .drop-multi{margin-top:6px}
     </style></head><body>
       <a href="/" class="back-link">← Kembali</a>
       <h2>🛠️ PDF Tools</h2>
+      <div class="cat-tabs">
+        <div class="cat-tab active" data-cat="all">Semua</div>
+        <div class="cat-tab" data-cat="organize">Organize</div>
+        <div class="cat-tab" data-cat="convert">Convert</div>
+        <div class="cat-tab" data-cat="security">Security</div>
+        <div class="cat-tab" data-cat="edit">Edit</div>
+      </div>
       <div class="tool-grid">
-        <div class="tool-card" data-tool="merge"><span class="tool-icon">🔗</span>Merge</div>
-        <div class="tool-card" data-tool="split"><span class="tool-icon">✂️</span>Split / Extract</div>
-        <div class="tool-card" data-tool="rotate"><span class="tool-icon">🔄</span>Rotate</div>
-        <div class="tool-card" data-tool="delete"><span class="tool-icon">🗑️</span>Hapus Halaman</div>
-        <div class="tool-card" data-tool="protect"><span class="tool-icon">🔒</span>Protect</div>
-        <div class="tool-card" data-tool="unlock"><span class="tool-icon">🔓</span>Unlock</div>
-        <div class="tool-card" data-tool="watermark"><span class="tool-icon">💧</span>Watermark</div>
+        <div class="tool-card" data-tool="merge" data-cat="organize"><span class="tool-icon">🔗</span>Merge</div>
+        <div class="tool-card" data-tool="split" data-cat="organize"><span class="tool-icon">✂️</span>Split / Extract</div>
+        <div class="tool-card" data-tool="rotate" data-cat="organize"><span class="tool-icon">🔄</span>Rotate</div>
+        <div class="tool-card" data-tool="delete" data-cat="organize"><span class="tool-icon">🗑️</span>Hapus Halaman</div>
+        <div class="tool-card" data-tool="pdf-to-jpg" data-cat="convert"><span class="tool-icon">🖼️</span>PDF ke JPG</div>
+        <div class="tool-card" data-tool="jpg-to-pdf" data-cat="convert"><span class="tool-icon">📄</span>JPG ke PDF</div>
+        <div class="tool-card" data-tool="pdf-to-word" data-cat="convert"><span class="tool-icon">📝</span>PDF ke Word</div>
+        <div class="tool-card" data-tool="protect" data-cat="security"><span class="tool-icon">🔒</span>Protect</div>
+        <div class="tool-card" data-tool="unlock" data-cat="security"><span class="tool-icon">🔓</span>Unlock</div>
+        <div class="tool-card" data-tool="watermark" data-cat="edit"><span class="tool-icon">💧</span>Watermark</div>
       </div>
 
       <div id="tool-form">
@@ -415,6 +543,20 @@ async def pdf_tools_page():
                     '<input type="hidden" name="position" value="center">' +
                     '<label>Ukuran font</label><input type="number" name="font_size" value="40" min="8" max="200">' +
                     '<label>Warna</label><input type="color" name="color" value="#808080">'
+          },
+          'pdf-to-jpg': {
+            endpoint: '/pdf/to-jpg', filename: 'pdf_to_jpg.zip',
+            fields: '<label>File PDF (maks 30 halaman)</label><input type="file" name="file" accept="application/pdf">'
+          },
+          'pdf-to-word': {
+            endpoint: '/pdf/to-word', filename: 'converted.docx',
+            fields: '<label>File PDF</label><input type="file" name="file" accept="application/pdf">' +
+                    '<p style="font-size:11px;color:#888;margin-top:8px">Hasil terbaik untuk PDF berbasis teks/tabel. Layout kompleks (kolom rumit, grafis berat) mungkin tidak sempurna.</p>'
+          },
+          'jpg-to-pdf': {
+            endpoint: '/image/to-pdf', filename: 'images_to_pdf.pdf',
+            fields: '<label>Pilih 1 atau lebih gambar (JPG/PNG)</label>' +
+                    '<input type="file" name="images" accept="image/*" multiple class="drop-multi">'
           }
         };
 
@@ -575,6 +717,17 @@ async def pdf_tools_page():
           };
         }
 
+        document.querySelectorAll('.cat-tab').forEach(tab => {
+          tab.onclick = () => {
+            document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            const cat = tab.dataset.cat;
+            document.querySelectorAll('.tool-card').forEach(card => {
+              card.classList.toggle('hidden', cat !== 'all' && card.dataset.cat !== cat);
+            });
+          };
+        });
+
         document.querySelectorAll('.tool-card').forEach(card => {
           card.onclick = () => {
             document.querySelectorAll('.tool-card').forEach(c => c.classList.remove('active'));
@@ -700,7 +853,11 @@ async def pdf_tools_page():
             let hasFile = false;
             formFields.querySelectorAll('input, select').forEach(el => {
               if (el.type === 'file') {
-                if (el.files[0]) { form.append(el.name, el.files[0]); hasFile = true; }
+                if (el.multiple) {
+                  for (const f of el.files) { form.append(el.name, f); hasFile = true; }
+                } else if (el.files[0]) {
+                  form.append(el.name, el.files[0]); hasFile = true;
+                }
               } else {
                 form.append(el.name, el.value);
               }
