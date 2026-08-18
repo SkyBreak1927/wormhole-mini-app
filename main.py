@@ -12,15 +12,25 @@ app.include_router(pdf_router)
 STORAGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage")
 os.makedirs(STORAGE_DIR, exist_ok=True)
 
+REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports")
+os.makedirs(REPORTS_DIR, exist_ok=True)
+
 MAX_FILE_SIZE = 500 * 1024 * 1024   # 500 MB per file
 RATE_LIMIT = 5                       # maks 5 upload request
 RATE_WINDOW = 60                     # per 60 detik per IP
 MAX_FILES_PER_BATCH = 20             # maks file per batch upload
 CLEANUP_INTERVAL = 30                # detik, jeda scan cleanup
 
+ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
+MAX_SCREENSHOT_SIZE = 10 * 1024 * 1024  # 10 MB
+REPORT_RATE_LIMIT = 5
+REPORT_RATE_WINDOW = 300             # 5 menit
+
 FILES = {}
 BATCHES = {}
-upload_log = defaultdict(list)  # ip -> [timestamp upload]
+REPORTS = []  # list of dict: id, description, screenshot_path, screenshot_name, timestamp
+upload_log = defaultdict(list)   # ip -> [timestamp upload]
+report_log = defaultdict(list)   # ip -> [timestamp laporan]
 
 
 def sanitize_filename(name: str) -> str:
@@ -35,6 +45,14 @@ def check_rate_limit(ip: str):
     if len(upload_log[ip]) >= RATE_LIMIT:
         raise HTTPException(status_code=429, detail="Terlalu banyak upload, coba lagi sebentar.")
     upload_log[ip].append(now)
+
+
+def check_report_rate_limit(ip: str):
+    now = time.time()
+    report_log[ip] = [t for t in report_log[ip] if now - t < REPORT_RATE_WINDOW]
+    if len(report_log[ip]) >= REPORT_RATE_LIMIT:
+        raise HTTPException(status_code=429, detail="Terlalu banyak laporan, coba lagi nanti.")
+    report_log[ip].append(now)
 
 
 def parse_expiry(expiry_minutes: str) -> Optional[float]:
@@ -105,6 +123,83 @@ async def upload_batch(request: Request, files: List[UploadFile] = File(...), ex
     batch_items = [await save_upload(file, expires_at) for file in files]
     BATCHES[batch_token] = batch_items
     return {"batch_token": batch_token}
+
+
+@app.post("/report-bug")
+async def report_bug(request: Request, description: str = Form(...), screenshot: UploadFile = File(None)):
+    check_report_rate_limit(request.client.host)
+
+    description = description.strip()[:1000]
+    if not description:
+        raise HTTPException(status_code=400, detail="Deskripsi tidak boleh kosong.")
+
+    report_id = secrets.token_urlsafe(8)
+    screenshot_path = None
+    screenshot_name = None
+
+    if screenshot and screenshot.filename:
+        if not (screenshot.content_type or "").startswith("image/"):
+            raise HTTPException(status_code=400, detail="File harus berupa gambar.")
+        screenshot_name = sanitize_filename(screenshot.filename)
+        screenshot_path = os.path.join(REPORTS_DIR, f"{report_id}_{screenshot_name}")
+        size = 0
+        with open(screenshot_path, "wb") as f:
+            while chunk := await screenshot.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_SCREENSHOT_SIZE:
+                    f.close()
+                    os.remove(screenshot_path)
+                    raise HTTPException(status_code=413, detail="Screenshot melebihi batas 10MB")
+                f.write(chunk)
+
+    REPORTS.append({
+        "id": report_id,
+        "description": description,
+        "screenshot_path": screenshot_path,
+        "screenshot_name": screenshot_name,
+        "timestamp": time.time(),
+    })
+    return {"ok": True}
+
+
+@app.get("/admin/reports", response_class=HTMLResponse)
+async def admin_reports(key: str = ""):
+    if not ADMIN_KEY or key != ADMIN_KEY:
+        raise HTTPException(status_code=403, detail="Akses ditolak.")
+
+    rows = ""
+    for r in reversed(REPORTS):
+        ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(r["timestamp"]))
+        img_html = ""
+        if r["screenshot_path"]:
+            img_url = f"/admin/reports/{r['id']}/screenshot?key={key}"
+            img_html = f'<a href="{img_url}" target="_blank"><img src="{img_url}" style="max-width:220px;border-radius:6px;margin-top:8px;display:block"></a>'
+        rows += f"""
+        <div style="border:1px solid #333;border-radius:8px;padding:14px;margin-bottom:14px">
+          <div style="color:#888;font-size:12px">{ts}</div>
+          <div style="margin-top:6px;white-space:pre-wrap">{r['description']}</div>
+          {img_html}
+        </div>"""
+
+    if not rows:
+        rows = "<p style='color:#888'>Belum ada laporan.</p>"
+
+    return f"""
+    <html><body style="background:#0f0f10;color:#eee;font-family:sans-serif;padding:30px 20px;max-width:600px;margin:0 auto">
+      <h2>🐛 Laporan Bug ({len(REPORTS)})</h2>
+      {rows}
+    </body></html>
+    """
+
+
+@app.get("/admin/reports/{report_id}/screenshot")
+async def admin_report_screenshot(report_id: str, key: str = ""):
+    if not ADMIN_KEY or key != ADMIN_KEY:
+        raise HTTPException(status_code=403, detail="Akses ditolak.")
+    report = next((r for r in REPORTS if r["id"] == report_id), None)
+    if not report or not report["screenshot_path"] or not os.path.exists(report["screenshot_path"]):
+        raise HTTPException(status_code=404, detail="Screenshot tidak ditemukan.")
+    return FileResponse(report["screenshot_path"])
 
 
 @app.get("/d/{token}", response_class=HTMLResponse)
@@ -195,7 +290,16 @@ async def home():
     return """
     <html><head><style>
       body{background:#0f0f10;color:#eee;font-family:sans-serif;display:flex;flex-direction:column;
-           align-items:center;justify-content:center;height:100vh;margin:0}
+           align-items:center;justify-content:center;height:100vh;margin:0;padding-top:26px;box-sizing:border-box}
+      #owner-marquee{position:fixed;top:0;left:0;width:100%;height:26px;background:#4da3ff;
+        overflow:hidden;white-space:nowrap;z-index:2000}
+      #owner-marquee span{display:inline-block;position:relative;left:-100%;
+        animation:owner-marquee-scroll 14s linear infinite;line-height:26px;
+        color:#fff;font-size:12px;font-weight:600;padding-left:100%}
+      @keyframes owner-marquee-scroll{
+        0%{left:-100%}
+        100%{left:100%}
+      }
       #drop{border:2px dashed #555;border-radius:12px;width:360px;height:200px;display:flex;
             align-items:center;justify-content:center;text-align:center;cursor:pointer;color:#999;padding:10px}
       #drop.hover{border-color:#4da3ff;color:#4da3ff}
@@ -226,7 +330,22 @@ async def home():
       .faq-item.open .faq-a{display:block}
       .faq-arrow{transition:transform 0.15s}
       .faq-item.open .faq-arrow{transform:rotate(90deg)}
+      #bug-btn{position:fixed;bottom:20px;left:20px;width:52px;height:52px;border-radius:50%;background:#ff6b6b;
+        display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;
+        box-shadow:0 2px 8px rgba(0,0,0,0.4);z-index:1000}
+      #bug-panel{position:fixed;bottom:84px;left:20px;width:280px;background:#1a1a1c;border:1px solid #333;
+        border-radius:12px;display:none;flex-direction:column;overflow:hidden;z-index:1000}
+      #bug-panel.open{display:flex}
+      #bug-header{padding:12px;background:#222;font-size:14px;display:flex;justify-content:space-between;align-items:center}
+      #bug-close{cursor:pointer;color:#888}
+      #bug-body{padding:10px;display:flex;flex-direction:column;gap:8px}
+      #bug-desc{width:100%;height:70px;padding:8px;background:#1a1a1c;color:#eee;border:1px solid #444;
+        border-radius:6px;font-size:13px;resize:none;box-sizing:border-box;font-family:inherit}
+      #bug-screenshot{font-size:12px;color:#999}
+      #bug-submit{padding:8px;background:#ff6b6b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;margin-top:0}
+      #bug-status{font-size:12px}
     </style></head><body>
+      <div id="owner-marquee"><span>This Property Owned by SkyBreak1927 !!!</span></div>
       <h2>🌀 wormhole-mini</h2>
       <a href="/pdf-tools" style="color:#4da3ff;font-size:13px;margin-bottom:14px;text-decoration:none">🛠️ Buka PDF Tools →</a>
       <div id="drop">Drop file (bisa lebih dari 1) di sini, atau klik untuk pilih<input id="file" type="file" multiple style="display:none"></div>
@@ -274,6 +393,17 @@ async def home():
             <div class="faq-q">Berapa ukuran file maksimal? <span class="faq-arrow">›</span></div>
             <div class="faq-a">Maksimal 500MB per file.</div>
           </div>
+        </div>
+      </div>
+
+      <div id="bug-btn" title="Laporkan bug">🐛</div>
+      <div id="bug-panel">
+        <div id="bug-header">Laporkan Bug <span id="bug-close">&times;</span></div>
+        <div id="bug-body">
+          <textarea id="bug-desc" placeholder="Ceritakan bug/error yang kamu temukan..."></textarea>
+          <input id="bug-screenshot" type="file" accept="image/*">
+          <button id="bug-submit">Kirim Laporan</button>
+          <div id="bug-status"></div>
         </div>
       </div>
 
@@ -386,6 +516,54 @@ async def home():
         document.querySelectorAll('.faq-q').forEach(q => {
           q.onclick = () => q.parentElement.classList.toggle('open');
         });
+
+        // --- Bug report widget ---
+        const bugBtn = document.getElementById('bug-btn');
+        const bugPanel = document.getElementById('bug-panel');
+        const bugClose = document.getElementById('bug-close');
+        const bugDesc = document.getElementById('bug-desc');
+        const bugScreenshot = document.getElementById('bug-screenshot');
+        const bugSubmit = document.getElementById('bug-submit');
+        const bugStatus = document.getElementById('bug-status');
+
+        bugBtn.onclick = () => bugPanel.classList.toggle('open');
+        bugClose.onclick = () => bugPanel.classList.remove('open');
+
+        bugSubmit.onclick = async () => {
+          const desc = bugDesc.value.trim();
+          if (!desc) {
+            bugStatus.textContent = "Isi deskripsi dulu ya.";
+            bugStatus.style.color = '#ff6b6b';
+            return;
+          }
+
+          const form = new FormData();
+          form.append('description', desc);
+          if (bugScreenshot.files[0]) form.append('screenshot', bugScreenshot.files[0]);
+
+          bugSubmit.disabled = true;
+          bugStatus.textContent = "Mengirim...";
+          bugStatus.style.color = '#999';
+
+          try {
+            const res = await fetch('/report-bug', { method: 'POST', body: form });
+            const data = await res.json();
+            if (res.ok) {
+              bugStatus.textContent = "✓ Terkirim, terima kasih!";
+              bugStatus.style.color = '#4dff88';
+              bugDesc.value = '';
+              bugScreenshot.value = '';
+            } else {
+              bugStatus.textContent = data.detail || "Gagal mengirim.";
+              bugStatus.style.color = '#ff6b6b';
+            }
+          } catch (e) {
+            bugStatus.textContent = "Gagal terhubung ke server.";
+            bugStatus.style.color = '#ff6b6b';
+          } finally {
+            bugSubmit.disabled = false;
+          }
+        };
       </script>
     </body></html>
     """
