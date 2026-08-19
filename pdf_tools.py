@@ -350,12 +350,23 @@ async def image_to_pdf(request: Request, images: List[UploadFile] = File(...)):
     )
 
 
+PDF_TO_WORD_MAX_PAGES = 50  # konversi Word jauh lebih berat per-halaman dibanding operasi PDF lain
+
+
 @router.post("/pdf/to-word")
 async def pdf_to_word(request: Request, file: UploadFile = File(...)):
     check_pdf_rate_limit(request.client.host)
     content = await read_pdf_upload(file)
     if len(content) > CONVERT_MAX_SIZE:
         raise HTTPException(status_code=413, detail=f"File melebihi batas {CONVERT_MAX_SIZE // (1024*1024)}MB untuk konversi.")
+
+    # cek jumlah halaman dulu (murah) sebelum commit ke proses konversi yang berat
+    page_count_reader = safe_read_pdf(content)
+    if len(page_count_reader.pages) > PDF_TO_WORD_MAX_PAGES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maks {PDF_TO_WORD_MAX_PAGES} halaman untuk konversi ke Word (server terbatas, dokumen besar butuh waktu sangat lama).",
+        )
 
     tmp_in_path = None
     tmp_out_path = None
@@ -549,9 +560,9 @@ async def pdf_tools_page():
             fields: '<label>File PDF (maks 30 halaman)</label><input type="file" name="file" accept="application/pdf">'
           },
           'pdf-to-word': {
-            endpoint: '/pdf/to-word', filename: 'converted.docx',
-            fields: '<label>File PDF</label><input type="file" name="file" accept="application/pdf">' +
-                    '<p style="font-size:11px;color:#888;margin-top:8px">Hasil terbaik untuk PDF berbasis teks/tabel. Layout kompleks (kolom rumit, grafis berat) mungkin tidak sempurna.</p>'
+            endpoint: '/pdf/to-word', filename: 'converted.docx', timeout: 300000,
+            fields: '<label>File PDF (maks 50 halaman)</label><input type="file" name="file" accept="application/pdf">' +
+                    '<p style="font-size:11px;color:#888;margin-top:8px">Hasil terbaik untuk PDF berbasis teks/tabel. Layout kompleks (kolom rumit, grafis berat) mungkin tidak sempurna. Dokumen banyak halaman bisa butuh beberapa menit.</p>'
           },
           'jpg-to-pdf': {
             endpoint: '/image/to-pdf', filename: 'images_to_pdf.pdf',
@@ -785,12 +796,12 @@ async def pdf_tools_page():
           progressText.textContent = label || (percent + '%');
         }
 
-        function submitWithProgress(url, formData) {
+        function submitWithProgress(url, formData, timeoutMs) {
           return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             xhr.open('POST', url);
             xhr.responseType = 'blob';
-            xhr.timeout = 180000;
+            xhr.timeout = timeoutMs || 180000;
 
             xhr.upload.onprogress = (e) => {
               if (e.lengthComputable) {
@@ -871,12 +882,15 @@ async def pdf_tools_page():
             filename = tool.filename;
           }
 
+          const toolConfig = (activeTool !== 'merge' && activeTool !== 'rotate') ? SIMPLE_TOOLS[activeTool] : null;
+          const timeoutMs = toolConfig && toolConfig.timeout ? toolConfig.timeout : 180000;
+
           toolSubmit.disabled = true;
           toolStatus.textContent = '';
           updateProgress(0, 'Mengupload... 0%');
 
           try {
-            const blob = await submitWithProgress(endpoint, form);
+            const blob = await submitWithProgress(endpoint, form, timeoutMs);
             updateProgress(100, '✓ Selesai');
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
