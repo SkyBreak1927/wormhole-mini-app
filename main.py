@@ -5,6 +5,7 @@ from fastapi import FastAPI, UploadFile, File, Request, HTTPException, Form
 from fastapi.responses import FileResponse, HTMLResponse
 from starlette.background import BackgroundTask
 from pdf_tools import router as pdf_router
+from database import check_db_connection
 
 app = FastAPI()
 app.include_router(pdf_router)
@@ -122,6 +123,16 @@ async def cleanup_old_reports_loop():
 async def start_cleanup():
     asyncio.create_task(cleanup_expired_loop())
     asyncio.create_task(cleanup_old_reports_loop())
+    if check_db_connection():
+        print("[startup] Database connection: OK")
+    else:
+        print("[startup] Database connection: FAILED (cek DATABASE_URL di Environment)")
+
+
+@app.get("/db-health")
+async def db_health():
+    ok = check_db_connection()
+    return {"database_connected": ok}
 
 
 @app.post("/upload")
