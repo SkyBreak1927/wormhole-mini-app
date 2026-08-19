@@ -6,3 +6,5 @@ reportlab
 pymupdf
 pillow
 pdf2docx
+sqlalchemy
+psycopg2-binary
