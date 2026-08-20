@@ -166,6 +166,24 @@ async def require_admin(user: dict = None):
     return user
 
 
+class LogoutRequest(BaseModel):
+    refresh_token: str = ""
+
+
+@router.post("/auth/logout")
+async def logout(body: LogoutRequest, authorization: str = Header(None)):
+    require_supabase()
+    if authorization and authorization.startswith("Bearer ") and body.refresh_token:
+        token = authorization.removeprefix("Bearer ").strip()
+        scoped_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        try:
+            scoped_client.auth.set_session(token, body.refresh_token)
+            scoped_client.auth.sign_out()
+        except Exception:
+            pass  # tetap anggap berhasil dari sisi user, browser tetap hapus token-nya
+    return {"message": "Berhasil logout."}
+
+
 @router.post("/auth/forgot-password")
 async def forgot_password(body: ForgotPasswordRequest):
     require_supabase()
