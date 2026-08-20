@@ -649,6 +649,11 @@ async def home():
         0%{left:-100%}
         100%{left:100%}
       }
+      #user-bar{position:fixed;top:34px;right:14px;display:flex;align-items:center;
+        gap:8px;font-size:11px;color:#888;z-index:900}
+      #logout-btn{margin:0;padding:5px 12px;background:#2a2a2c;color:#eee;border:1px solid #444;
+        border-radius:6px;cursor:pointer;font-size:11px}
+      #logout-btn:hover{border-color:#ff6b6b;color:#ff6b6b}
       #drop{border:2px dashed #555;border-radius:12px;width:360px;height:200px;display:flex;
             align-items:center;justify-content:center;text-align:center;cursor:pointer;color:#999;padding:10px}
       #drop.hover{border-color:#4da3ff;color:#4da3ff}
@@ -695,6 +700,10 @@ async def home():
       #bug-status{font-size:12px}
     </style></head><body>
       <div id="owner-marquee"><span>This Property Owned by SkyBreak1927 !!!</span></div>
+      <div id="user-bar">
+        <span id="user-email-display"></span>
+        <button id="logout-btn">Logout</button>
+      </div>
       <h2>🌀 wormhole-mini</h2>
       <a href="/pdf-tools" style="color:#4da3ff;font-size:13px;margin-bottom:14px;text-decoration:none">🛠️ Buka PDF Tools →</a>
       <div id="drop">Drop file (bisa lebih dari 1) di sini, atau klik untuk pilih<input id="file" type="file" multiple style="display:none"></div>
@@ -791,6 +800,21 @@ async def home():
             return false;
           }
         }
+
+        document.getElementById('user-email-display').textContent = localStorage.getItem('user_email') || '';
+        document.getElementById('logout-btn').onclick = async () => {
+          try {
+            await fetch('/auth/logout', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + getAccessToken()
+              },
+              body: JSON.stringify({refresh_token: getRefreshToken() || ''})
+            });
+          } catch (e) {}
+          logoutAndRedirect();
+        };
 
         const drop = document.getElementById('drop');
         const fileInput = document.getElementById('file');
