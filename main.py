@@ -368,7 +368,7 @@ async def register_page():
 
         <div id="step-verify" class="step">
           <label>Kode verifikasi (cek email kamu)</label>
-          <input type="text" id="verify-code" placeholder="6 digit kode" maxlength="6">
+          <input type="text" id="verify-code" placeholder="Kode dari email" maxlength="12">
           <button id="btn-verify">Verifikasi</button>
         </div>
 
@@ -543,7 +543,7 @@ async def forgot_password_page():
 
         <div id="step-reset" class="step">
           <label>Kode reset (cek email kamu)</label>
-          <input type="text" id="fp-code" placeholder="6 digit kode" maxlength="6">
+          <input type="text" id="fp-code" placeholder="Kode dari email" maxlength="12">
           <label>Password baru</label>
           <div class="pw-wrap">
             <input type="password" id="fp-new-password" placeholder="Min. 6 karakter">
