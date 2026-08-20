@@ -319,6 +319,182 @@ async def batch_page(batch_token: str):
     """
 
 
+AUTH_PAGE_CSS = """
+      body{background:#0f0f10;color:#eee;font-family:sans-serif;display:flex;flex-direction:column;
+           align-items:center;justify-content:center;height:100vh;margin:0;padding:20px;box-sizing:border-box}
+      .auth-box{width:100%;max-width:340px}
+      h2{margin-bottom:6px;text-align:center}
+      .auth-sub{color:#888;font-size:13px;text-align:center;margin-bottom:20px}
+      label{font-size:12px;color:#999;display:block;margin-top:12px;margin-bottom:4px}
+      input{width:100%;padding:10px;background:#1a1a1c;color:#eee;border:1px solid #444;
+        border-radius:6px;box-sizing:border-box;font-size:14px}
+      button{width:100%;margin-top:18px;padding:10px;border:none;border-radius:6px;
+        background:#4da3ff;color:#fff;cursor:pointer;font-size:14px}
+      button:disabled{opacity:0.5;cursor:not-allowed}
+      #status{margin-top:12px;font-size:13px;text-align:center;min-height:18px}
+      .switch-link{margin-top:16px;text-align:center;font-size:13px;color:#888}
+      .switch-link a{color:#4da3ff;text-decoration:none}
+      .step{display:none}
+      .step.active{display:block}
+"""
+
+
+@app.get("/register", response_class=HTMLResponse)
+async def register_page():
+    return f"""
+    <html><head><style>{AUTH_PAGE_CSS}</style></head><body>
+      <div class="auth-box">
+        <h2>Daftar Akun</h2>
+        <p class="auth-sub">wormhole-mini</p>
+
+        <div id="step-register" class="step active">
+          <label>Email</label>
+          <input type="email" id="reg-email" placeholder="email@kamu.com">
+          <label>Password</label>
+          <input type="password" id="reg-password" placeholder="Min. 6 karakter">
+          <button id="btn-register">Daftar</button>
+        </div>
+
+        <div id="step-verify" class="step">
+          <label>Kode verifikasi (cek email kamu)</label>
+          <input type="text" id="verify-code" placeholder="6 digit kode" maxlength="6">
+          <button id="btn-verify">Verifikasi</button>
+        </div>
+
+        <div id="status"></div>
+        <div class="switch-link">Sudah punya akun? <a href="/login">Login di sini</a></div>
+      </div>
+
+      <script>
+        const stepRegister = document.getElementById('step-register');
+        const stepVerify = document.getElementById('step-verify');
+        const statusEl = document.getElementById('status');
+        let pendingEmail = '';
+
+        function setStatus(msg, isError) {{
+          statusEl.textContent = msg;
+          statusEl.style.color = isError ? '#ff6b6b' : '#4dff88';
+        }}
+
+        document.getElementById('btn-register').onclick = async () => {{
+          const email = document.getElementById('reg-email').value.trim();
+          const password = document.getElementById('reg-password').value;
+          if (!email || !password) {{ setStatus('Isi email dan password dulu.', true); return; }}
+
+          const btn = document.getElementById('btn-register');
+          btn.disabled = true;
+          setStatus('Memproses...', false);
+
+          try {{
+            const res = await fetch('/auth/register', {{
+              method: 'POST',
+              headers: {{'Content-Type': 'application/json'}},
+              body: JSON.stringify({{email, password}})
+            }});
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || 'Gagal daftar');
+
+            pendingEmail = email;
+            setStatus('Kode verifikasi sudah dikirim ke email kamu.', false);
+            stepRegister.classList.remove('active');
+            stepVerify.classList.add('active');
+          }} catch (err) {{
+            setStatus(err.message, true);
+          }} finally {{
+            btn.disabled = false;
+          }}
+        }};
+
+        document.getElementById('btn-verify').onclick = async () => {{
+          const code = document.getElementById('verify-code').value.trim();
+          if (!code) {{ setStatus('Isi kode verifikasi dulu.', true); return; }}
+
+          const btn = document.getElementById('btn-verify');
+          btn.disabled = true;
+          setStatus('Memverifikasi...', false);
+
+          try {{
+            const res = await fetch('/auth/verify', {{
+              method: 'POST',
+              headers: {{'Content-Type': 'application/json'}},
+              body: JSON.stringify({{email: pendingEmail, code}})
+            }});
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || 'Kode salah');
+
+            setStatus('Berhasil! Mengalihkan ke halaman login...', false);
+            setTimeout(() => {{ window.location.href = '/login'; }}, 1500);
+          }} catch (err) {{
+            setStatus(err.message, true);
+          }} finally {{
+            btn.disabled = false;
+          }}
+        }};
+      </script>
+    </body></html>
+    """
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    return f"""
+    <html><head><style>{AUTH_PAGE_CSS}</style></head><body>
+      <div class="auth-box">
+        <h2>Login</h2>
+        <p class="auth-sub">wormhole-mini</p>
+
+        <label>Email</label>
+        <input type="email" id="login-email" placeholder="email@kamu.com">
+        <label>Password</label>
+        <input type="password" id="login-password" placeholder="Password kamu">
+        <button id="btn-login">Login</button>
+
+        <div id="status"></div>
+        <div class="switch-link">Belum punya akun? <a href="/register">Daftar di sini</a></div>
+      </div>
+
+      <script>
+        const statusEl = document.getElementById('status');
+        function setStatus(msg, isError) {{
+          statusEl.textContent = msg;
+          statusEl.style.color = isError ? '#ff6b6b' : '#4dff88';
+        }}
+
+        document.getElementById('btn-login').onclick = async () => {{
+          const email = document.getElementById('login-email').value.trim();
+          const password = document.getElementById('login-password').value;
+          if (!email || !password) {{ setStatus('Isi email dan password dulu.', true); return; }}
+
+          const btn = document.getElementById('btn-login');
+          btn.disabled = true;
+          setStatus('Memproses...', false);
+
+          try {{
+            const res = await fetch('/auth/login', {{
+              method: 'POST',
+              headers: {{'Content-Type': 'application/json'}},
+              body: JSON.stringify({{email, password}})
+            }});
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || 'Login gagal');
+
+            localStorage.setItem('access_token', data.access_token);
+            localStorage.setItem('user_id', data.user_id);
+            localStorage.setItem('user_email', email);
+
+            setStatus('Berhasil login! Mengalihkan...', false);
+            setTimeout(() => {{ window.location.href = '/'; }}, 1000);
+          }} catch (err) {{
+            setStatus(err.message, true);
+          }} finally {{
+            btn.disabled = false;
+          }}
+        }};
+      </script>
+    </body></html>
+    """
+
+
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return """
