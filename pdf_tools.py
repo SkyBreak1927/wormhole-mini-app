@@ -1,13 +1,14 @@
 import io, time, json, zipfile, tempfile, os
 from collections import defaultdict
 from typing import List
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Depends
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 import pymupdf
 from PIL import Image
 from pdf2docx import Converter
+from auth import get_current_user
 
 router = APIRouter()
 
@@ -92,7 +93,7 @@ def pdf_response(writer: PdfWriter, filename: str) -> StreamingResponse:
 
 
 @router.post("/pdf/merge")
-async def pdf_merge(request: Request, files: List[UploadFile] = File(...)):
+async def pdf_merge(request: Request, files: List[UploadFile] = File(...), user: dict = Depends(get_current_user)):
     check_pdf_rate_limit(request.client.host)
     if len(files) < 2:
         raise HTTPException(status_code=400, detail="Pilih minimal 2 file PDF untuk digabung.")
@@ -108,7 +109,7 @@ async def pdf_merge(request: Request, files: List[UploadFile] = File(...)):
 
 
 @router.post("/pdf/split")
-async def pdf_split(request: Request, file: UploadFile = File(...), pages: str = Form(...)):
+async def pdf_split(request: Request, file: UploadFile = File(...), pages: str = Form(...), user: dict = Depends(get_current_user)):
     check_pdf_rate_limit(request.client.host)
     content = await read_pdf_upload(file)
     reader = safe_read_pdf(content)
@@ -122,7 +123,7 @@ async def pdf_split(request: Request, file: UploadFile = File(...), pages: str =
 
 
 @router.post("/pdf/rotate")
-async def pdf_rotate(request: Request, file: UploadFile = File(...), angles: str = Form(...)):
+async def pdf_rotate(request: Request, file: UploadFile = File(...), angles: str = Form(...), user: dict = Depends(get_current_user)):
     check_pdf_rate_limit(request.client.host)
     content = await read_pdf_upload(file)
     reader = safe_read_pdf(content)
@@ -151,7 +152,7 @@ async def pdf_rotate(request: Request, file: UploadFile = File(...), angles: str
 
 
 @router.post("/pdf/delete-pages")
-async def pdf_delete_pages(request: Request, file: UploadFile = File(...), pages: str = Form(...)):
+async def pdf_delete_pages(request: Request, file: UploadFile = File(...), pages: str = Form(...), user: dict = Depends(get_current_user)):
     check_pdf_rate_limit(request.client.host)
     content = await read_pdf_upload(file)
     reader = safe_read_pdf(content)
@@ -170,7 +171,7 @@ async def pdf_delete_pages(request: Request, file: UploadFile = File(...), pages
 
 
 @router.post("/pdf/protect")
-async def pdf_protect(request: Request, file: UploadFile = File(...), password: str = Form(...)):
+async def pdf_protect(request: Request, file: UploadFile = File(...), password: str = Form(...), user: dict = Depends(get_current_user)):
     check_pdf_rate_limit(request.client.host)
     if len(password) < 4:
         raise HTTPException(status_code=400, detail="Password minimal 4 karakter.")
@@ -186,7 +187,7 @@ async def pdf_protect(request: Request, file: UploadFile = File(...), password: 
 
 
 @router.post("/pdf/unlock")
-async def pdf_unlock(request: Request, file: UploadFile = File(...), password: str = Form(...)):
+async def pdf_unlock(request: Request, file: UploadFile = File(...), password: str = Form(...), user: dict = Depends(get_current_user)):
     check_pdf_rate_limit(request.client.host)
     content = await read_pdf_upload(file)
     reader = safe_read_pdf(content, password=password)
@@ -242,6 +243,7 @@ async def pdf_watermark(
     position: str = Form("center"),
     font_size: int = Form(40),
     color: str = Form("#808080"),
+    user: dict = Depends(get_current_user),
 ):
     check_pdf_rate_limit(request.client.host)
     text = text.strip()[:100]
@@ -288,7 +290,7 @@ CONVERT_MAX_SIZE = 30 * 1024 * 1024  # 30 MB, konversi lebih berat dari operasi 
 
 
 @router.post("/pdf/to-jpg")
-async def pdf_to_jpg(request: Request, file: UploadFile = File(...)):
+async def pdf_to_jpg(request: Request, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     check_pdf_rate_limit(request.client.host)
     content = await read_pdf_upload(file)
     if len(content) > CONVERT_MAX_SIZE:
@@ -320,7 +322,7 @@ async def pdf_to_jpg(request: Request, file: UploadFile = File(...)):
 
 
 @router.post("/image/to-pdf")
-async def image_to_pdf(request: Request, images: List[UploadFile] = File(...)):
+async def image_to_pdf(request: Request, images: List[UploadFile] = File(...), user: dict = Depends(get_current_user)):
     check_pdf_rate_limit(request.client.host)
     if not images:
         raise HTTPException(status_code=400, detail="Pilih minimal 1 gambar.")
@@ -354,7 +356,7 @@ PDF_TO_WORD_MAX_PAGES = 50  # konversi Word jauh lebih berat per-halaman dibandi
 
 
 @router.post("/pdf/to-word")
-async def pdf_to_word(request: Request, file: UploadFile = File(...)):
+async def pdf_to_word(request: Request, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     check_pdf_rate_limit(request.client.host)
     content = await read_pdf_upload(file)
     if len(content) > CONVERT_MAX_SIZE:
@@ -512,6 +514,41 @@ async def pdf_tools_page():
       </script>
 
       <script>
+        // --- Auth guard: redirect ke /login kalau belum ada token sama sekali ---
+        if (!localStorage.getItem('access_token')) {
+          window.location.href = '/login';
+        }
+
+        function getAccessToken() { return localStorage.getItem('access_token'); }
+        function getRefreshToken() { return localStorage.getItem('refresh_token'); }
+
+        function logoutAndRedirect() {
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('refresh_token');
+          localStorage.removeItem('user_id');
+          localStorage.removeItem('user_email');
+          window.location.href = '/login';
+        }
+
+        async function tryRefreshToken() {
+          const refreshToken = getRefreshToken();
+          if (!refreshToken) return false;
+          try {
+            const res = await fetch('/auth/refresh', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({refresh_token: refreshToken})
+            });
+            if (!res.ok) return false;
+            const data = await res.json();
+            localStorage.setItem('access_token', data.access_token);
+            localStorage.setItem('refresh_token', data.refresh_token);
+            return true;
+          } catch (e) {
+            return false;
+          }
+        }
+
         const pdfjsReady = window.pdfjsLib
           ? Promise.resolve()
           : new Promise(resolve => window.addEventListener('pdfjs-ready', resolve, { once: true }));
@@ -796,10 +833,11 @@ async def pdf_tools_page():
           progressText.textContent = label || (percent + '%');
         }
 
-        function submitWithProgress(url, formData, timeoutMs) {
+        function submitWithProgress(url, formData, timeoutMs, isRetry) {
           return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             xhr.open('POST', url);
+            xhr.setRequestHeader('Authorization', 'Bearer ' + getAccessToken());
             xhr.responseType = 'blob';
             xhr.timeout = timeoutMs || 180000;
 
@@ -810,7 +848,21 @@ async def pdf_tools_page():
               }
             };
 
-            xhr.onload = () => {
+            xhr.onload = async () => {
+              if (xhr.status === 401 && !isRetry) {
+                const refreshed = await tryRefreshToken();
+                if (refreshed) {
+                  try {
+                    resolve(await submitWithProgress(url, formData, timeoutMs, true));
+                  } catch (e) {
+                    reject(e);
+                  }
+                } else {
+                  logoutAndRedirect();
+                  reject(new Error('Sesi berakhir, mengalihkan ke login...'));
+                }
+                return;
+              }
               if (xhr.status >= 200 && xhr.status < 300) {
                 resolve(xhr.response);
               } else {
@@ -882,12 +934,12 @@ async def pdf_tools_page():
             filename = tool.filename;
           }
 
-          const toolConfig = (activeTool !== 'merge' && activeTool !== 'rotate') ? SIMPLE_TOOLS[activeTool] : null;
-          const timeoutMs = toolConfig && toolConfig.timeout ? toolConfig.timeout : 180000;
-
           toolSubmit.disabled = true;
           toolStatus.textContent = '';
           updateProgress(0, 'Mengupload... 0%');
+
+          const toolConfig = (activeTool !== 'merge' && activeTool !== 'rotate') ? SIMPLE_TOOLS[activeTool] : null;
+          const timeoutMs = toolConfig && toolConfig.timeout ? toolConfig.timeout : 180000;
 
           try {
             const blob = await submitWithProgress(endpoint, form, timeoutMs);
