@@ -336,6 +336,12 @@ AUTH_PAGE_CSS = """
       .switch-link a{color:#4da3ff;text-decoration:none}
       .step{display:none}
       .step.active{display:block}
+      .pw-wrap{position:relative}
+      .pw-wrap input{padding-right:36px}
+      .pw-toggle{position:absolute;right:8px;top:50%;transform:translateY(50%);background:none;
+        border:none;cursor:pointer;font-size:15px;padding:4px;margin:0;width:auto}
+      .forgot-link{display:block;text-align:right;font-size:12px;color:#4da3ff;
+        text-decoration:none;margin-top:6px}
 """
 
 
@@ -351,7 +357,10 @@ async def register_page():
           <label>Email</label>
           <input type="email" id="reg-email" placeholder="email@kamu.com">
           <label>Password</label>
-          <input type="password" id="reg-password" placeholder="Min. 6 karakter">
+          <div class="pw-wrap">
+            <input type="password" id="reg-password" placeholder="Min. 6 karakter">
+            <button type="button" class="pw-toggle" data-target="reg-password" title="Lihat/sembunyikan password">👁️</button>
+          </div>
           <button id="btn-register">Daftar</button>
         </div>
 
@@ -430,6 +439,14 @@ async def register_page():
             btn.disabled = false;
           }}
         }};
+
+        document.querySelectorAll('.pw-toggle').forEach(btn => {{
+          btn.onclick = () => {{
+            const input = document.getElementById(btn.dataset.target);
+            input.type = input.type === 'password' ? 'text' : 'password';
+            btn.style.opacity = input.type === 'password' ? '1' : '0.6';
+          }};
+        }});
       </script>
     </body></html>
     """
@@ -446,7 +463,11 @@ async def login_page():
         <label>Email</label>
         <input type="email" id="login-email" placeholder="email@kamu.com">
         <label>Password</label>
-        <input type="password" id="login-password" placeholder="Password kamu">
+        <div class="pw-wrap">
+          <input type="password" id="login-password" placeholder="Password kamu">
+          <button type="button" class="pw-toggle" data-target="login-password" title="Lihat/sembunyikan password">👁️</button>
+        </div>
+        <a href="/forgot-password" class="forgot-link">Lupa password?</a>
         <button id="btn-login">Login</button>
 
         <div id="status"></div>
@@ -490,6 +511,121 @@ async def login_page():
             btn.disabled = false;
           }}
         }};
+
+        document.querySelectorAll('.pw-toggle').forEach(btn => {{
+          btn.onclick = () => {{
+            const input = document.getElementById(btn.dataset.target);
+            input.type = input.type === 'password' ? 'text' : 'password';
+            btn.style.opacity = input.type === 'password' ? '1' : '0.6';
+          }};
+        }});
+      </script>
+    </body></html>
+    """
+
+
+@app.get("/forgot-password", response_class=HTMLResponse)
+async def forgot_password_page():
+    return f"""
+    <html><head><style>{AUTH_PAGE_CSS}</style></head><body>
+      <div class="auth-box">
+        <h2>Lupa Password</h2>
+        <p class="auth-sub">wormhole-mini</p>
+
+        <div id="step-request" class="step active">
+          <label>Email akun kamu</label>
+          <input type="email" id="fp-email" placeholder="email@kamu.com">
+          <button id="btn-request">Kirim Kode Reset</button>
+        </div>
+
+        <div id="step-reset" class="step">
+          <label>Kode reset (cek email kamu)</label>
+          <input type="text" id="fp-code" placeholder="6 digit kode" maxlength="6">
+          <label>Password baru</label>
+          <div class="pw-wrap">
+            <input type="password" id="fp-new-password" placeholder="Min. 6 karakter">
+            <button type="button" class="pw-toggle" data-target="fp-new-password" title="Lihat/sembunyikan password">👁️</button>
+          </div>
+          <button id="btn-reset">Ganti Password</button>
+        </div>
+
+        <div id="status"></div>
+        <div class="switch-link"><a href="/login">← Kembali ke login</a></div>
+      </div>
+
+      <script>
+        const stepRequest = document.getElementById('step-request');
+        const stepReset = document.getElementById('step-reset');
+        const statusEl = document.getElementById('status');
+        let pendingEmail = '';
+
+        function setStatus(msg, isError) {{
+          statusEl.textContent = msg;
+          statusEl.style.color = isError ? '#ff6b6b' : '#4dff88';
+        }}
+
+        document.getElementById('btn-request').onclick = async () => {{
+          const email = document.getElementById('fp-email').value.trim();
+          if (!email) {{ setStatus('Isi email dulu.', true); return; }}
+
+          const btn = document.getElementById('btn-request');
+          btn.disabled = true;
+          setStatus('Memproses...', false);
+
+          try {{
+            const res = await fetch('/auth/forgot-password', {{
+              method: 'POST',
+              headers: {{'Content-Type': 'application/json'}},
+              body: JSON.stringify({{email}})
+            }});
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || 'Gagal mengirim kode');
+
+            pendingEmail = email;
+            setStatus(data.message, false);
+            stepRequest.classList.remove('active');
+            stepReset.classList.add('active');
+          }} catch (err) {{
+            setStatus(err.message, true);
+          }} finally {{
+            btn.disabled = false;
+          }}
+        }};
+
+        document.getElementById('btn-reset').onclick = async () => {{
+          const code = document.getElementById('fp-code').value.trim();
+          const newPassword = document.getElementById('fp-new-password').value;
+          if (!code || !newPassword) {{ setStatus('Isi kode dan password baru dulu.', true); return; }}
+
+          const btn = document.getElementById('btn-reset');
+          btn.disabled = true;
+          setStatus('Memproses...', false);
+
+          try {{
+            const res = await fetch('/auth/reset-password', {{
+              method: 'POST',
+              headers: {{'Content-Type': 'application/json'}},
+              body: JSON.stringify({{email: pendingEmail, code, new_password: newPassword}})
+            }});
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || 'Gagal reset password');
+
+            setStatus('Password berhasil diubah! Mengalihkan ke login...', false);
+            setTimeout(() => {{ window.location.href = '/login'; }}, 1500);
+          }} catch (err) {{
+            setStatus(err.message, true);
+          }} finally {{
+            btn.disabled = false;
+          }}
+        }};
+
+        document.querySelectorAll('.pw-toggle').forEach(btn => {{
+          btn.onclick = () => {{
+            const input = document.getElementById(btn.dataset.target);
+            input.type = input.type === 'password' ? 'text' : 'password';
+            btn.style.opacity = input.type === 'password' ? '1' : '0.6';
+          }};
+        }});
       </script>
     </body></html>
     """
