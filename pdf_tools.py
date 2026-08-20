@@ -473,8 +473,17 @@ async def pdf_tools_page():
       .tool-card{display:flex}
       .tool-card.hidden{display:none}
       .drop-multi{margin-top:6px}
+      #user-bar{position:fixed;top:14px;right:14px;display:flex;align-items:center;
+        gap:8px;font-size:11px;color:#888;z-index:900}
+      #logout-btn{margin:0;padding:5px 12px;background:#2a2a2c;color:#eee;border:1px solid #444;
+        border-radius:6px;cursor:pointer;font-size:11px}
+      #logout-btn:hover{border-color:#ff6b6b;color:#ff6b6b}
     </style></head><body>
       <a href="/" class="back-link">← Kembali</a>
+      <div id="user-bar">
+        <span id="user-email-display"></span>
+        <button id="logout-btn">Logout</button>
+      </div>
       <h2>🛠️ PDF Tools</h2>
       <div class="cat-tabs">
         <div class="cat-tab active" data-cat="all">Semua</div>
@@ -548,6 +557,21 @@ async def pdf_tools_page():
             return false;
           }
         }
+
+        document.getElementById('user-email-display').textContent = localStorage.getItem('user_email') || '';
+        document.getElementById('logout-btn').onclick = async () => {
+          try {
+            await fetch('/auth/logout', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + getAccessToken()
+              },
+              body: JSON.stringify({refresh_token: getRefreshToken() || ''})
+            });
+          } catch (e) {}
+          logoutAndRedirect();
+        };
 
         const pdfjsReady = window.pdfjsLib
           ? Promise.resolve()
