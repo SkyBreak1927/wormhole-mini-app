@@ -6,9 +6,11 @@ from fastapi.responses import FileResponse, HTMLResponse
 from starlette.background import BackgroundTask
 from pdf_tools import router as pdf_router
 from database import check_db_connection
+from auth import router as auth_router
 
 app = FastAPI()
 app.include_router(pdf_router)
+app.include_router(auth_router)
 
 STORAGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage")
 os.makedirs(STORAGE_DIR, exist_ok=True)
