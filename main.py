@@ -338,8 +338,8 @@ AUTH_PAGE_CSS = """
       .step.active{display:block}
       .pw-wrap{position:relative}
       .pw-wrap input{padding-right:36px}
-      .pw-toggle{position:absolute;right:8px;top:50%;transform:translateY(50%);background:none;
-        border:none;cursor:pointer;font-size:15px;padding:4px;margin:0;width:auto}
+      .pw-toggle{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;
+        border:none;cursor:pointer;font-size:15px;padding:4px;margin:0;width:auto;line-height:1}
       .forgot-link{display:block;text-align:right;font-size:12px;color:#4da3ff;
         text-decoration:none;margin-top:6px}
 """
