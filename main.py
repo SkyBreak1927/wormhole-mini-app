@@ -7,6 +7,8 @@ from starlette.background import BackgroundTask
 from pdf_tools import router as pdf_router
 from database import check_db_connection
 from auth import router as auth_router
+from auth import get_current_user
+from fastapi import Depends
 
 app = FastAPI()
 app.include_router(pdf_router)
@@ -138,7 +140,7 @@ async def db_health():
 
 
 @app.post("/upload")
-async def upload(request: Request, file: UploadFile = File(...), expiry_minutes: str = Form("0")):
+async def upload(request: Request, file: UploadFile = File(...), expiry_minutes: str = Form("0"), user: dict = Depends(get_current_user)):
     check_rate_limit(request.client.host)
     expires_at = parse_expiry(expiry_minutes)
     result = await save_upload(file, expires_at)
@@ -146,7 +148,7 @@ async def upload(request: Request, file: UploadFile = File(...), expiry_minutes:
 
 
 @app.post("/upload-batch")
-async def upload_batch(request: Request, files: List[UploadFile] = File(...), expiry_minutes: str = Form("0")):
+async def upload_batch(request: Request, files: List[UploadFile] = File(...), expiry_minutes: str = Form("0"), user: dict = Depends(get_current_user)):
     check_rate_limit(request.client.host)
 
     if len(files) > MAX_FILES_PER_BATCH:
@@ -500,6 +502,7 @@ async def login_page():
             if (!res.ok) throw new Error(data.detail || 'Login gagal');
 
             localStorage.setItem('access_token', data.access_token);
+            localStorage.setItem('refresh_token', data.refresh_token);
             localStorage.setItem('user_id', data.user_id);
             localStorage.setItem('user_email', email);
 
@@ -754,6 +757,41 @@ async def home():
       </div>
 
       <script>
+        // --- Auth guard: redirect ke /login kalau belum ada token sama sekali ---
+        if (!localStorage.getItem('access_token')) {
+          window.location.href = '/login';
+        }
+
+        function getAccessToken() { return localStorage.getItem('access_token'); }
+        function getRefreshToken() { return localStorage.getItem('refresh_token'); }
+
+        function logoutAndRedirect() {
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('refresh_token');
+          localStorage.removeItem('user_id');
+          localStorage.removeItem('user_email');
+          window.location.href = '/login';
+        }
+
+        async function tryRefreshToken() {
+          const refreshToken = getRefreshToken();
+          if (!refreshToken) return false;
+          try {
+            const res = await fetch('/auth/refresh', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({refresh_token: refreshToken})
+            });
+            if (!res.ok) return false;
+            const data = await res.json();
+            localStorage.setItem('access_token', data.access_token);
+            localStorage.setItem('refresh_token', data.refresh_token);
+            return true;
+          } catch (e) {
+            return false;
+          }
+        }
+
         const drop = document.getElementById('drop');
         const fileInput = document.getElementById('file');
         const expirySelect = document.getElementById('expiry');
@@ -790,10 +828,11 @@ async def home():
           document.getElementById('progress-container').style.display = 'none';
         }
 
-        function uploadWithProgress(url, formData) {
+        function uploadWithProgress(url, formData, isRetry) {
           return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             xhr.open("POST", url);
+            xhr.setRequestHeader("Authorization", "Bearer " + getAccessToken());
             xhr.timeout = 180000;
 
             xhr.upload.onprogress = (e) => {
@@ -802,7 +841,21 @@ async def home():
               }
             };
 
-            xhr.onload = () => {
+            xhr.onload = async () => {
+              if (xhr.status === 401 && !isRetry) {
+                const refreshed = await tryRefreshToken();
+                if (refreshed) {
+                  try {
+                    resolve(await uploadWithProgress(url, formData, true));
+                  } catch (e) {
+                    reject(e);
+                  }
+                } else {
+                  logoutAndRedirect();
+                  reject(new Error("Sesi berakhir, mengalihkan ke login..."));
+                }
+                return;
+              }
               if (xhr.status >= 200 && xhr.status < 300) {
                 resolve(JSON.parse(xhr.responseText));
               } else {
