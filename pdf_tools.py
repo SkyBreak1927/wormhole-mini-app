@@ -437,8 +437,29 @@ async def pdf_compress(
                 try:
                     base_image = doc.extract_image(xref)
                     pil_img = Image.open(io.BytesIO(base_image["image"]))
-                    if pil_img.mode != "RGB":
+
+                    # PDF nyimpen transparansi TERPISAH dari gambar warnanya (soft mask / smask),
+                    # beda dari PNG biasa yang alpha-nya nyatu. Kalau ada smask, ambil juga,
+                    # baru gabungkan ke background putih -- kalau tidak, area transparan bisa
+                    # kelihatan hitam/warna acak (bug nyata yang pernah kejadian, logo jadi kotak hitam).
+                    smask_xref = base_image.get("smask", 0)
+                    if smask_xref:
+                        smask_bytes = doc.extract_image(smask_xref)["image"]
+                        alpha_img = Image.open(io.BytesIO(smask_bytes)).convert("L")
+                        if alpha_img.size != pil_img.size:
+                            alpha_img = alpha_img.resize(pil_img.size)
+                        rgb_img = pil_img.convert("RGB")
+                        white_bg = Image.new("RGB", rgb_img.size, (255, 255, 255))
+                        white_bg.paste(rgb_img, mask=alpha_img)
+                        pil_img = white_bg
+                    elif pil_img.mode in ("RGBA", "LA") or (pil_img.mode == "P" and "transparency" in pil_img.info):
+                        pil_img = pil_img.convert("RGBA")
+                        white_bg = Image.new("RGB", pil_img.size, (255, 255, 255))
+                        white_bg.paste(pil_img, mask=pil_img.split()[-1])
+                        pil_img = white_bg
+                    elif pil_img.mode != "RGB":
                         pil_img = pil_img.convert("RGB")
+
                     out_buf = io.BytesIO()
                     pil_img.save(out_buf, format="JPEG", quality=quality)
                     page.replace_image(xref, stream=out_buf.getvalue())
