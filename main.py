@@ -1,4 +1,5 @@
 import os, re, secrets, time, asyncio
+from urllib.parse import quote
 from typing import List, Optional
 from collections import defaultdict
 from fastapi import FastAPI, UploadFile, File, Request, HTTPException, Form
@@ -249,11 +250,12 @@ async def download_page(token: str):
         remaining_min = max(0, int((entry["expires_at"] - time.time()) / 60))
         expiry_note = f'<p style="color:#888;font-size:12px">Kadaluarsa dalam ~{remaining_min} menit</p>'
 
+    download_url = f"/d/{token}/{quote(entry['filename'])}"
     return f"""
     <html><body style="background:#0f0f10;color:#eee;font-family:sans-serif;
     display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0">
       <h3>📦 {entry['filename']}</h3>
-      <a href="/d/{token}/file">
+      <a href="{download_url}">
         <button style="padding:10px 20px;background:#4da3ff;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:15px">
           Download
         </button>
@@ -264,8 +266,11 @@ async def download_page(token: str):
     """
 
 
-@app.get("/d/{token}/file")
-async def download_file(token: str):
+@app.get("/d/{token}/{filename_hint}")
+async def download_file(token: str, filename_hint: str):
+    # filename_hint (bagian akhir URL) tidak dipakai buat lookup (token yang jadi kunci
+    # sebenarnya) -- ini cuma supaya browser (khususnya Safari iOS) yang kadang ambil nama
+    # file dari URL, bukan dari header, tetap dapat nama yang benar saat file di-share.
     entry = FILES.get(token)
     if not entry or not os.path.exists(entry["path"]) or is_expired(entry):
         FILES.pop(token, None)
@@ -292,10 +297,11 @@ async def batch_page(batch_token: str):
             if entry.get("expires_at"):
                 remaining_min = max(0, int((entry["expires_at"] - time.time()) / 60))
                 note = f'<span style="font-size:11px;color:#666"> ({remaining_min}m lagi)</span>'
+            item_download_url = f"/d/{item['token']}/{quote(item['filename'])}"
             rows += f"""
             <div class="row">
               <span>{item['filename']}{note}</span>
-              <a href="/d/{item['token']}/file"><button>Download</button></a>
+              <a href="{item_download_url}"><button>Download</button></a>
             </div>"""
         else:
             rows += f"""
