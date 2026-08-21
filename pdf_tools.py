@@ -402,6 +402,70 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), user: dict
     )
 
 
+COMPRESS_MAX_PAGES = 50
+COMPRESS_QUALITY_MAP = {"light": 80, "medium": 60, "max": 35}
+
+
+@router.post("/pdf/compress")
+async def pdf_compress(
+    request: Request,
+    file: UploadFile = File(...),
+    level: str = Form("medium"),
+    user: dict = Depends(get_current_user),
+):
+    check_pdf_rate_limit(request.client.host)
+    content = await read_pdf_upload(file)
+    if len(content) > CONVERT_MAX_SIZE:
+        raise HTTPException(status_code=413, detail=f"File melebihi batas {CONVERT_MAX_SIZE // (1024*1024)}MB.")
+    if level not in COMPRESS_QUALITY_MAP:
+        raise HTTPException(status_code=400, detail="Level kompresi tidak valid.")
+    quality = COMPRESS_QUALITY_MAP[level]
+
+    try:
+        doc = pymupdf.open(stream=content, filetype="pdf")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Gagal membaca PDF, file mungkin rusak.")
+
+    if doc.page_count > COMPRESS_MAX_PAGES:
+        doc.close()
+        raise HTTPException(status_code=400, detail=f"Maks {COMPRESS_MAX_PAGES} halaman untuk kompresi.")
+
+    try:
+        for page in doc:
+            for img_info in page.get_images(full=True):
+                xref = img_info[0]
+                try:
+                    base_image = doc.extract_image(xref)
+                    pil_img = Image.open(io.BytesIO(base_image["image"]))
+                    if pil_img.mode != "RGB":
+                        pil_img = pil_img.convert("RGB")
+                    out_buf = io.BytesIO()
+                    pil_img.save(out_buf, format="JPEG", quality=quality)
+                    page.replace_image(xref, stream=out_buf.getvalue())
+                except Exception:
+                    continue  # kalau 1 gambar gagal diproses, lanjut ke yang lain, jangan gagalkan semuanya
+
+        output = io.BytesIO()
+        doc.save(output, garbage=4, deflate=True, clean=True)
+        doc.close()
+    except HTTPException:
+        raise
+    except Exception:
+        doc.close()
+        raise HTTPException(status_code=400, detail="Gagal mengompresi PDF ini.")
+
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": 'attachment; filename="compressed.pdf"',
+            "X-Original-Size": str(len(content)),
+            "X-Compressed-Size": str(output.getbuffer().nbytes),
+        },
+    )
+
+
 @router.get("/pdf-tools", response_class=HTMLResponse)
 async def pdf_tools_page():
     return """
@@ -488,6 +552,7 @@ async def pdf_tools_page():
       <div class="cat-tabs">
         <div class="cat-tab active" data-cat="all">Semua</div>
         <div class="cat-tab" data-cat="organize">Organize</div>
+        <div class="cat-tab" data-cat="optimize">Optimize</div>
         <div class="cat-tab" data-cat="convert">Convert</div>
         <div class="cat-tab" data-cat="security">Security</div>
         <div class="cat-tab" data-cat="edit">Edit</div>
@@ -497,6 +562,7 @@ async def pdf_tools_page():
         <div class="tool-card" data-tool="split" data-cat="organize"><span class="tool-icon">✂️</span>Split / Extract</div>
         <div class="tool-card" data-tool="rotate" data-cat="organize"><span class="tool-icon">🔄</span>Rotate</div>
         <div class="tool-card" data-tool="delete" data-cat="organize"><span class="tool-icon">🗑️</span>Hapus Halaman</div>
+        <div class="tool-card" data-tool="compress" data-cat="optimize"><span class="tool-icon">🗜️</span>Compress</div>
         <div class="tool-card" data-tool="pdf-to-jpg" data-cat="convert"><span class="tool-icon">🖼️</span>PDF ke JPG</div>
         <div class="tool-card" data-tool="jpg-to-pdf" data-cat="convert"><span class="tool-icon">📄</span>JPG ke PDF</div>
         <div class="tool-card" data-tool="pdf-to-word" data-cat="convert"><span class="tool-icon">📝</span>PDF ke Word</div>
@@ -619,6 +685,16 @@ async def pdf_tools_page():
           'pdf-to-jpg': {
             endpoint: '/pdf/to-jpg', filename: 'pdf_to_jpg.zip',
             fields: '<label>File PDF (maks 30 halaman)</label><input type="file" name="file" accept="application/pdf">'
+          },
+          compress: {
+            endpoint: '/pdf/compress', filename: 'compressed.pdf',
+            fields: '<label>File PDF (maks 50 halaman)</label><input type="file" name="file" accept="application/pdf">' +
+                    '<label>Level kompresi</label>' +
+                    '<select name="level">' +
+                      '<option value="light">Ringan (kualitas gambar paling terjaga)</option>' +
+                      '<option value="medium" selected>Sedang (disarankan)</option>' +
+                      '<option value="max">Maksimal (ukuran paling kecil)</option>' +
+                    '</select>'
           },
           'pdf-to-word': {
             endpoint: '/pdf/to-word', filename: 'converted.docx', timeout: 300000,
@@ -888,7 +964,11 @@ async def pdf_tools_page():
                 return;
               }
               if (xhr.status >= 200 && xhr.status < 300) {
-                resolve(xhr.response);
+                resolve({
+                  blob: xhr.response,
+                  originalSize: xhr.getResponseHeader('X-Original-Size'),
+                  compressedSize: xhr.getResponseHeader('X-Compressed-Size'),
+                });
               } else {
                 const reader = new FileReader();
                 reader.onload = () => {
@@ -966,14 +1046,24 @@ async def pdf_tools_page():
           const timeoutMs = toolConfig && toolConfig.timeout ? toolConfig.timeout : 180000;
 
           try {
-            const blob = await submitWithProgress(endpoint, form, timeoutMs);
+            const result = await submitWithProgress(endpoint, form, timeoutMs);
+            const blob = result.blob;
             updateProgress(100, '✓ Selesai');
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url; a.download = filename;
             document.body.appendChild(a); a.click(); a.remove();
             URL.revokeObjectURL(url);
-            toolStatus.textContent = '✓ Selesai, file terunduh.';
+
+            if (activeTool === 'compress' && result.originalSize && result.compressedSize) {
+              const before = parseInt(result.originalSize);
+              const after = parseInt(result.compressedSize);
+              const pct = Math.round((1 - after / before) * 100);
+              const fmtSize = (n) => (n / 1024 / 1024 >= 1) ? (n / 1024 / 1024).toFixed(2) + ' MB' : Math.round(n / 1024) + ' KB';
+              toolStatus.textContent = `✓ Selesai, file terunduh. Ukuran turun ${pct}% (${fmtSize(before)} → ${fmtSize(after)})`;
+            } else {
+              toolStatus.textContent = '✓ Selesai, file terunduh.';
+            }
             toolStatus.style.color = '#4dff88';
             setTimeout(() => { progressContainer.style.display = 'none'; }, 800);
           } catch (err) {
