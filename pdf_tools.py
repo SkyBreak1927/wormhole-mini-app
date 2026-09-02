@@ -514,9 +514,9 @@ async def pdf_tools_page():
       #tool-submit:disabled{opacity:0.5;cursor:not-allowed}
       #tool-status{margin-top:10px;font-size:13px;text-align:center}
       a.back-link{color:#888;font-size:13px;margin-bottom:16px;text-decoration:none}
-      #merge-zone,#rotate-zone{border:2px dashed #555;border-radius:10px;padding:16px;text-align:center;cursor:pointer;
+      #merge-zone,#rotate-zone,#split-zone{border:2px dashed #555;border-radius:10px;padding:16px;text-align:center;cursor:pointer;
                   font-size:13px;color:#999;margin-top:6px;transition:border-color 0.15s}
-      #merge-zone.hover,#rotate-zone.hover{border-color:#4da3ff;color:#4da3ff}
+      #merge-zone.hover,#rotate-zone.hover,#split-zone.hover{border-color:#4da3ff;color:#4da3ff}
       #merge-file-list{margin-top:10px}
       .merge-item{display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid #333;
                   border-radius:6px;margin-bottom:6px;font-size:12px}
@@ -535,6 +535,21 @@ async def pdf_tools_page():
         display:flex;align-items:center;justify-content:center}
       .rotate-thumb-btn:hover{background:#6db4ff}
       #rotate-note{grid-column:1/-1;font-size:11px;color:#888;margin-top:4px}
+      #split-thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:10px;margin-top:12px}
+      .split-thumb{position:relative;border:2px solid #333;border-radius:8px;padding:8px 6px;text-align:center;
+                    background:#1a1a1c;overflow:hidden;cursor:pointer;transition:border-color 0.15s}
+      .split-thumb canvas{max-width:100%;height:auto;display:block;margin:0 auto}
+      .split-thumb-label{font-size:10px;color:#888;margin-top:6px}
+      .split-thumb.selected{border-color:#4da3ff}
+      .split-thumb.selected::after{content:'✓';position:absolute;top:5px;right:5px;width:20px;height:20px;
+        border-radius:50%;background:#4da3ff;color:#fff;font-size:12px;line-height:20px;text-align:center}
+      #split-note{grid-column:1/-1;font-size:11px;color:#888;margin-top:4px}
+      #split-actions{display:flex;gap:8px;margin-top:10px}
+      #split-actions button{flex:1;padding:6px;background:#222;border:1px solid #444;border-radius:5px;
+        color:#eee;cursor:pointer;font-size:12px}
+      #split-actions button:hover{border-color:#4da3ff}
+      #split-count{font-size:12px;color:#999;margin-top:8px}
+      #split-manual{margin-top:4px}
       #tool-progress-container{width:100%;margin-top:14px;display:none}
       #tool-progress-bar-bg{width:100%;height:8px;background:#222;border-radius:4px;overflow:hidden}
       #tool-progress-bar{height:100%;width:0%;background:#4da3ff;transition:width 0.15s linear}
@@ -668,11 +683,6 @@ async def pdf_tools_page():
           '<button type="button" class="pw-toggle" title="Lihat/sembunyikan password">👁️</button>';
 
         const SIMPLE_TOOLS = {
-          split: {
-            endpoint: '/pdf/split', filename: 'extracted.pdf',
-            fields: '<label>File PDF</label><input type="file" name="file" accept="application/pdf">' +
-                    '<label>Halaman yang diambil (contoh: 1-3,5,7-9)</label><input type="text" name="pages" placeholder="1-3,5">'
-          },
           delete: {
             endpoint: '/pdf/delete-pages', filename: 'edited.pdf',
             fields: '<label>File PDF</label><input type="file" name="file" accept="application/pdf">' +
@@ -739,6 +749,20 @@ async def pdf_tools_page():
           '<div id="rotate-zone">Klik atau drop file PDF di sini<input id="rotate-file-input" type="file" accept="application/pdf" style="display:none"></div>' +
           '<div id="rotate-thumbs"></div>';
 
+        const SPLIT_FIELDS_HTML =
+          '<label>Pilih file PDF, lalu klik halaman yang mau diambil</label>' +
+          '<div id="split-zone">Klik atau drop file PDF di sini<input id="split-file-input" type="file" accept="application/pdf" style="display:none"></div>' +
+          '<div id="split-thumbs"></div>' +
+          '<div id="split-actions" style="display:none">' +
+            '<button type="button" id="split-select-all">Pilih Semua</button>' +
+            '<button type="button" id="split-clear">Kosongkan</button>' +
+          '</div>' +
+          '<p id="split-count"></p>' +
+          '<div id="split-manual" style="display:none">' +
+            '<label>Halaman tambahan di luar preview (contoh: 45,50-52)</label>' +
+            '<input type="text" id="split-manual-input" placeholder="45,50-52">' +
+          '</div>';
+
         const MAX_PREVIEW_PAGES = 30;
 
         let activeTool = null;
@@ -746,6 +770,9 @@ async def pdf_tools_page():
         let rotateFile = null;
         let pageAngles = {};
         let rotatePageCount = 0;
+        let splitFile = null;
+        let selectedPages = {};
+        let splitPageCount = 0;
 
         const toolForm = document.getElementById('tool-form');
         const formFields = document.getElementById('form-fields');
@@ -886,6 +913,112 @@ async def pdf_tools_page():
           };
         }
 
+        function updateSplitCount() {
+          const countEl = document.getElementById('split-count');
+          if (!countEl) return;
+          const n = Object.keys(selectedPages).length;
+          countEl.textContent = n === 0 ? 'Belum ada halaman dipilih.' : n + ' halaman dipilih.';
+        }
+
+        async function loadSplitFile(file) {
+          splitFile = file;
+          selectedPages = {};
+          const thumbsEl = document.getElementById('split-thumbs');
+          const actionsEl = document.getElementById('split-actions');
+          const manualEl = document.getElementById('split-manual');
+          if (!thumbsEl) return;
+          thumbsEl.innerHTML = '<p style="grid-column:1/-1;font-size:12px;color:#999">Memuat preview halaman...</p>';
+          actionsEl.style.display = 'none';
+          manualEl.style.display = 'none';
+          updateSplitCount();
+
+          try {
+            await pdfjsReady;
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            splitPageCount = pdf.numPages;
+            const previewCount = Math.min(splitPageCount, MAX_PREVIEW_PAGES);
+
+            thumbsEl.innerHTML = '';
+            for (let i = 1; i <= previewCount; i++) {
+              const page = await pdf.getPage(i);
+              const viewport = page.getViewport({ scale: 0.3 });
+              const canvas = document.createElement('canvas');
+              canvas.width = viewport.width;
+              canvas.height = viewport.height;
+              const ctx = canvas.getContext('2d');
+              await page.render({ canvasContext: ctx, viewport }).promise;
+
+              const wrap = document.createElement('div');
+              wrap.className = 'split-thumb';
+              wrap.dataset.page = String(i - 1);
+              wrap.appendChild(canvas);
+
+              const label = document.createElement('div');
+              label.className = 'split-thumb-label';
+              label.textContent = 'Hal. ' + i;
+              wrap.appendChild(label);
+
+              wrap.onclick = () => {
+                const idx = parseInt(wrap.dataset.page);
+                if (selectedPages[idx]) {
+                  delete selectedPages[idx];
+                  wrap.classList.remove('selected');
+                } else {
+                  selectedPages[idx] = true;
+                  wrap.classList.add('selected');
+                }
+                updateSplitCount();
+              };
+
+              thumbsEl.appendChild(wrap);
+            }
+
+            actionsEl.style.display = 'flex';
+
+            if (splitPageCount > MAX_PREVIEW_PAGES) {
+              const note = document.createElement('p');
+              note.id = 'split-note';
+              note.textContent = 'Preview dibatasi ' + MAX_PREVIEW_PAGES + ' halaman pertama (dokumen ini ' +
+                splitPageCount + ' halaman). Untuk halaman setelahnya, isi manual di bawah.';
+              thumbsEl.appendChild(note);
+              manualEl.style.display = 'block';
+            }
+          } catch (err) {
+            thumbsEl.innerHTML = '<p style="grid-column:1/-1;font-size:12px;color:#ff6b6b">Gagal memuat preview PDF.</p>';
+          }
+        }
+
+        function setupSplitZone() {
+          const zone = document.getElementById('split-zone');
+          const input = document.getElementById('split-file-input');
+          if (!zone || !input) return;
+
+          zone.onclick = () => input.click();
+          input.onchange = () => { if (input.files[0]) loadSplitFile(input.files[0]); };
+          zone.ondragover = e => { e.preventDefault(); zone.classList.add('hover'); };
+          zone.ondragleave = () => zone.classList.remove('hover');
+          zone.ondrop = e => {
+            e.preventDefault();
+            zone.classList.remove('hover');
+            const f = e.dataTransfer.files[0];
+            if (f && f.type === 'application/pdf') loadSplitFile(f);
+          };
+
+          document.getElementById('split-select-all').onclick = () => {
+            document.querySelectorAll('.split-thumb').forEach(wrap => {
+              selectedPages[parseInt(wrap.dataset.page)] = true;
+              wrap.classList.add('selected');
+            });
+            updateSplitCount();
+          };
+          document.getElementById('split-clear').onclick = () => {
+            selectedPages = {};
+            document.querySelectorAll('.split-thumb').forEach(wrap => wrap.classList.remove('selected'));
+            updateSplitCount();
+          };
+        }
+
         document.querySelectorAll('.cat-tab').forEach(tab => {
           tab.onclick = () => {
             document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
@@ -915,6 +1048,11 @@ async def pdf_tools_page():
               pageAngles = {};
               formFields.innerHTML = ROTATE_FIELDS_HTML;
               setupRotateZone();
+            } else if (activeTool === 'split') {
+              splitFile = null;
+              selectedPages = {};
+              formFields.innerHTML = SPLIT_FIELDS_HTML;
+              setupSplitZone();
             } else {
               formFields.innerHTML = SIMPLE_TOOLS[activeTool].fields;
               if (activeTool === 'watermark') setupPositionGrid();
@@ -1036,6 +1174,26 @@ async def pdf_tools_page():
             form.append('angles', JSON.stringify(pageAngles));
             endpoint = '/pdf/rotate';
             filename = 'rotated.pdf';
+          } else if (activeTool === 'split') {
+            if (!splitFile) {
+              toolStatus.textContent = 'Pilih file PDF dulu.';
+              toolStatus.style.color = '#ff6b6b';
+              return;
+            }
+            const fromThumbs = Object.keys(selectedPages).map(idx => parseInt(idx) + 1);
+            const manualInput = document.getElementById('split-manual-input');
+            const manualVal = manualInput ? manualInput.value.trim() : '';
+            const pagesSpec = fromThumbs.sort((a, b) => a - b).join(',') +
+              (manualVal ? (fromThumbs.length ? ',' : '') + manualVal : '');
+            if (!pagesSpec) {
+              toolStatus.textContent = 'Pilih minimal 1 halaman.';
+              toolStatus.style.color = '#ff6b6b';
+              return;
+            }
+            form.append('file', splitFile);
+            form.append('pages', pagesSpec);
+            endpoint = '/pdf/split';
+            filename = 'extracted.pdf';
           } else {
             const tool = SIMPLE_TOOLS[activeTool];
             let hasFile = false;
@@ -1063,7 +1221,7 @@ async def pdf_tools_page():
           toolStatus.textContent = '';
           updateProgress(0, 'Mengupload... 0%');
 
-          const toolConfig = (activeTool !== 'merge' && activeTool !== 'rotate') ? SIMPLE_TOOLS[activeTool] : null;
+          const toolConfig = (activeTool !== 'merge' && activeTool !== 'rotate' && activeTool !== 'split') ? SIMPLE_TOOLS[activeTool] : null;
           const timeoutMs = toolConfig && toolConfig.timeout ? toolConfig.timeout : 180000;
 
           try {
