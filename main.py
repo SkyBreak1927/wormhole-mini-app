@@ -771,6 +771,7 @@ async def home():
         </div>
       </div>
 
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
       <script>
         // --- Auth guard: redirect ke /login kalau belum ada token sama sekali ---
         if (!localStorage.getItem('access_token')) {
@@ -834,7 +835,17 @@ async def home():
         function showResult(link) {
           document.getElementById('result').innerHTML =
             `<p>Link:</p><input type="text" value="${link}" readonly onclick="this.select()">
-             <br><button id="copybtn" onclick="copyLink('${link}')">Copy Link</button>`;
+             <br><button id="copybtn" onclick="copyLink('${link}')">Copy Link</button>
+             <div id="qrcode" style="margin-top:14px;display:inline-block;background:#fff;padding:10px;border-radius:8px"></div>
+             <p style="color:#888;font-size:12px;margin-top:6px">Scan pakai kamera HP (Android/iOS) buat buka link ini</p>`;
+          new QRCode(document.getElementById('qrcode'), {
+            text: link,
+            width: 160,
+            height: 160,
+            colorDark: "#000000",
+            colorLight: "#ffffff",
+            correctLevel: QRCode.CorrectLevel.M
+          });
         }
 
         function copyLink(link) {
