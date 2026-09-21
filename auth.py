@@ -53,9 +53,19 @@ async def register(body: RegisterRequest):
     if len(body.password) < 6:
         raise HTTPException(status_code=400, detail="Password minimal 6 karakter.")
     try:
-        supabase.auth.sign_up({"email": body.email, "password": body.password})
+        result = supabase.auth.sign_up({"email": body.email, "password": body.password})
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    # Supabase tidak throw error untuk email yang sudah terkonfirmasi sebelumnya
+    # (anti email-enumeration by design). Bedakan lewat field 'identities':
+    # kosong = email sudah pernah terdaftar & terverifikasi, bukan user baru.
+    if result.user and not result.user.identities:
+        raise HTTPException(
+            status_code=400,
+            detail="Email ini sudah terdaftar. Silakan login atau gunakan Lupa Password."
+        )
+
     return {"message": "Kode verifikasi sudah dikirim ke email kamu."}
 
 
