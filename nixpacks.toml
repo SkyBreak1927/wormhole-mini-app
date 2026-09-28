@@ -1,0 +1,5 @@
+# Suruh Railway (Nixpacks) install Tesseract OCR + language pack Indonesia & Inggris
+# pas build, biar fitur OCR di Edit Teks jalan. Taruh file ini di ROOT repo
+# (sejajar sama main.py / requirements.txt).
+[phases.setup]
+aptPkgs = ["tesseract-ocr", "tesseract-ocr-eng", "tesseract-ocr-ind"]
