@@ -147,9 +147,13 @@ def _parse_text_blocks(raw: dict, page_index: int, id_prefix: str, ocr: bool = F
         # bawahnya; (2) font/bold cuma diambil dari baris PERTAMA terus dipaksain ke SELURUH
         # isi block -> paragraf biasa ikut kebold kalau baris pertamanya heading bold. Makanya
         # di sini block mentahnya dipecah ulang jadi beberapa "paragraf" terpisah: setiap ada
-        # baris kosong (pemisah paragraf yang jelas) ATAU pergantian font/bold antar baris
-        # yang nempel langsung tanpa baris kosong (heading nempel langsung ke body-nya),
-        # biar tiap paragraf/heading punya kotak edit, ukuran, & font sendiri-sendiri
+        # baris kosong (pemisah paragraf yang jelas), ATAU pergantian font/bold antar baris
+        # yang nempel langsung tanpa baris kosong (heading nempel langsung ke body-nya), ATAU
+        # baris yang lompat jauh ke KANAN dari baris sebelumnya padahal y-nya sebaris (ini
+        # tandanya dua KOLOM TABEL yang beda, mis. "Project Name:" | "SEP-41 GUARD" -- kadang
+        # label & isinya sama-sama bold jadi font-signature-nya sama persis & gak ketangkep
+        # sama pengecekan font di atas; makanya perlu dicek jaraknya juga). Biar tiap
+        # paragraf/heading/kolom tabel punya kotak edit, ukuran, & font sendiri-sendiri
         # sesuai aslinya, bukan ketuker gabung ke tetangganya.
         def _line_signature(line):
             spans = line.get("spans", [])
@@ -160,9 +164,21 @@ def _parse_text_blocks(raw: dict, page_index: int, id_prefix: str, ocr: bool = F
             is_bold = bool(sp.get("flags", 0) & 16) or "bold" in font_name.lower()
             return (font_name, round(sp.get("size", 0.0), 1), is_bold)
 
+        def _same_row_big_gap(prev_line, line):
+            prev_bbox = prev_line.get("bbox") if prev_line else None
+            cur_bbox = line.get("bbox")
+            if not prev_bbox or not cur_bbox:
+                return False
+            y_overlap = min(prev_bbox[3], cur_bbox[3]) - max(prev_bbox[1], cur_bbox[1])
+            row_height = min(prev_bbox[3] - prev_bbox[1], cur_bbox[3] - cur_bbox[1])
+            if row_height <= 0 or y_overlap < row_height * 0.5:
+                return False  # bukan baris yang sebaris/overlap vertikal -> bukan kolom tabel
+            return (cur_bbox[0] - prev_bbox[2]) > 20  # loncat jauh ke kanan -> kolom lain
+
         groups = []
         current_group = []
         current_sig = None
+        prev_line = None
         for line in block.get("lines", []):
             spans = line.get("spans", [])
             line_text = "".join(s.get("text", "") for s in spans)
@@ -171,13 +187,16 @@ def _parse_text_blocks(raw: dict, page_index: int, id_prefix: str, ocr: bool = F
                     groups.append(current_group)
                     current_group = []
                     current_sig = None
+                prev_line = None
                 continue
             sig = _line_signature(line)
-            if current_group and sig != current_sig:
+            new_column = current_group and _same_row_big_gap(prev_line, line)
+            if current_group and (sig != current_sig or new_column):
                 groups.append(current_group)
                 current_group = []
             current_group.append(line)
             current_sig = sig
+            prev_line = line
         if current_group:
             groups.append(current_group)
 
@@ -1543,12 +1562,14 @@ async def pdf_tools_page():
           wrap.appendChild(mask);
 
           const { family, weight, style } = mapFontFamily(block.font);
-          // Faktor 0.82 ini koreksi buat font vektor PDF asli yang dirender via CSS (Helvetica/
-          // Arial cenderung kegedean dibanding metric PDF point-size aslinya). Blok hasil OCR
-          // udah punya font-size perkiraan dari tinggi baris tulisan di gambar scan-nya --
-          // kalau dikalikan 0.82 lagi, teksnya jadi keliatan mini & janggal dibanding baris lain
-          // yang masih gambar asli. Jadi koreksi ini cuma dipakai buat blok teks native.
-          const sizeCorrection = isOcrBlock ? 1 : 0.82;
+          // Dulu ada faktor 0.82 di sini buat "koreksi" font vektor PDF asli, asumsinya
+          // Helvetica/Arial substitute-nya CSS keliatan lebih gede dari ukuran point PDF
+          // aslinya. Udah diukur langsung pakai canvas.measureText() dibanding lebar bbox
+          // teks asli dari PDF-nya (bukan nebak lagi): ternyata substitute font-nya malah
+          // SEDIKIT LEBIH SEMPIT (cuma beda ~2-5%) di kebanyakan dokumen, bukan lebih lebar.
+          // Faktor 0.82 (nyusutin 18%) jusru bikin teks hasil edit keliatan mini & gak pas
+          // dibanding teks asli di sebelahnya -- makanya dihapus, dipakein ukuran asli PDF-nya.
+          const sizeCorrection = 1;
           const div = document.createElement('div');
           div.className = 'edit-block';
           div.contentEditable = 'true';
