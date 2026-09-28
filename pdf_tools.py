@@ -734,6 +734,7 @@ async def pdf_tools_page():
       .edit-page-btn.active{background:#4da3ff;border-color:#4da3ff;color:#fff}
       #edit-canvas-wrap{border:1px solid #333;border-radius:8px;max-width:100%;overflow:auto}
       .edit-block{transition:outline-color 0.1s,background 0.1s}
+      .edit-hotspot{transition:background 0.1s}
       #merge-file-list{margin-top:10px}
       .merge-item{display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid #333;
                   border-radius:6px;margin-bottom:6px;font-size:12px}
@@ -1362,40 +1363,88 @@ async def pdf_tools_page():
 
           const pageData = editPagesData[pageIndex];
           pageData.blocks.forEach(block => {
-            const [x0, y0, x1, y1] = block.bbox;
             const editState = editEditedBlocks[block.id];
-            const bottom = editState ? editState.new_bottom_y : y1;
-
-            // kotak putih nutupin teks asli, biar teks lama & baru gak keliatan dobel pas edit
-            const mask = document.createElement('div');
-            mask.style.cssText = `position:absolute;left:${x0 * editScale}px;top:${y0 * editScale}px;` +
-              `width:${(x1 - x0) * editScale}px;height:${(bottom - y0) * editScale}px;background:#fff;`;
-            wrap.appendChild(mask);
-
-            const { family, weight, style } = mapFontFamily(block.font);
-            const div = document.createElement('div');
-            div.className = 'edit-block';
-            div.contentEditable = 'true';
-            div.dataset.blockId = block.id;
-            div.dataset.origX0 = x0; div.dataset.origY0 = y0;
-            div.dataset.origX1 = x1; div.dataset.origBottom = y1;
-            div.textContent = editState ? editState.text : block.text;
-            div.style.cssText = `position:absolute;left:${x0 * editScale}px;top:${y0 * editScale}px;` +
-              `width:${(x1 - x0) * editScale}px;min-height:${(y1 - y0) * editScale}px;` +
-              `font-family:${family};font-weight:${weight};font-style:${style};` +
-              `font-size:${block.size * editScale * 0.82}px;color:${block.color};line-height:1.25;` +
-              `outline:none;cursor:text;white-space:pre-wrap;word-break:break-word;padding:1px 2px;`;
-            div.onfocus = () => {
-              div.style.outline = '1px dashed #4da3ff';
-              div.style.background = 'rgba(77,163,255,0.08)';
-            };
-            div.onblur = () => {
-              div.style.outline = 'none';
-              div.style.background = 'transparent';
-              saveEditBlock(block, div);
-            };
-            wrap.appendChild(div);
+            if (editState) {
+              // blok ini udah pernah diedit sebelumnya: mask + teks baru wajib tetep kepasang,
+              // biar teks asli yang ketutup gak nongol dobel sama teks hasil editan
+              mountEditableBlock(wrap, block, editState.text, editState.new_bottom_y, false);
+            } else {
+              // default: render asli PDF (canvas) dibiarin apa adanya, cuma dikasih
+              // "hotspot" tak kasat mata buat nandain area yang bisa diklik buat diedit
+              mountBlockHotspot(wrap, block);
+            }
           });
+        }
+
+        function mountBlockHotspot(wrap, block) {
+          const [x0, y0, x1, y1] = block.bbox;
+          const hotspot = document.createElement('div');
+          hotspot.className = 'edit-hotspot';
+          hotspot.dataset.blockId = block.id;
+          hotspot.style.cssText = `position:absolute;left:${x0 * editScale}px;top:${y0 * editScale}px;` +
+            `width:${(x1 - x0) * editScale}px;height:${(y1 - y0) * editScale}px;` +
+            `background:transparent;cursor:text;`;
+          hotspot.onmouseenter = () => { hotspot.style.background = 'rgba(77,163,255,0.10)'; };
+          hotspot.onmouseleave = () => { hotspot.style.background = 'transparent'; };
+          hotspot.onclick = () => {
+            const editState = editEditedBlocks[block.id];
+            hotspot.remove();
+            mountEditableBlock(wrap, block, editState ? editState.text : block.text, editState ? editState.new_bottom_y : null, true);
+          };
+          wrap.appendChild(hotspot);
+        }
+
+        function mountEditableBlock(wrap, block, text, forcedBottom, autofocus) {
+          const [x0, y0, x1, y1] = block.bbox;
+          const bottom = forcedBottom || y1;
+
+          // kotak putih nutupin teks asli, biar teks lama & baru gak keliatan dobel pas edit
+          const mask = document.createElement('div');
+          mask.className = 'edit-mask';
+          mask.dataset.blockId = block.id;
+          mask.style.cssText = `position:absolute;left:${x0 * editScale}px;top:${y0 * editScale}px;` +
+            `width:${(x1 - x0) * editScale}px;height:${(bottom - y0) * editScale}px;background:#fff;`;
+          wrap.appendChild(mask);
+
+          const { family, weight, style } = mapFontFamily(block.font);
+          const div = document.createElement('div');
+          div.className = 'edit-block';
+          div.contentEditable = 'true';
+          div.dataset.blockId = block.id;
+          div.dataset.origX0 = x0; div.dataset.origY0 = y0;
+          div.dataset.origX1 = x1; div.dataset.origBottom = y1;
+          div.textContent = text;
+          div.style.cssText = `position:absolute;left:${x0 * editScale}px;top:${y0 * editScale}px;` +
+            `width:${(x1 - x0) * editScale}px;min-height:${(y1 - y0) * editScale}px;` +
+            `font-family:${family};font-weight:${weight};font-style:${style};` +
+            `font-size:${block.size * editScale * 0.82}px;color:${block.color};line-height:1.25;` +
+            `outline:none;cursor:text;white-space:pre-wrap;word-break:break-word;padding:1px 2px;`;
+          div.onfocus = () => {
+            div.style.outline = '1px dashed #4da3ff';
+            div.style.background = 'rgba(77,163,255,0.08)';
+          };
+          div.onblur = () => {
+            div.style.outline = 'none';
+            div.style.background = 'transparent';
+            saveEditBlock(block, div);
+            if (!editEditedBlocks[block.id]) {
+              // teksnya balik sama kayak aslinya, jadi lepas mode edit &
+              // balikin ke render PDF asli (hotspot lagi) biar tampilan gak berubah
+              mask.remove();
+              div.remove();
+              mountBlockHotspot(wrap, block);
+            }
+          };
+          wrap.appendChild(div);
+          if (autofocus) {
+            div.focus();
+            const range = document.createRange();
+            range.selectNodeContents(div);
+            range.collapse(false);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
         }
 
         function saveEditBlock(block, div) {
