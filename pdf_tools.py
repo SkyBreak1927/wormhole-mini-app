@@ -175,13 +175,27 @@ def _parse_text_blocks(raw: dict, page_index: int, id_prefix: str, ocr: bool = F
                 return False  # bukan baris yang sebaris/overlap vertikal -> bukan kolom tabel
             return (cur_bbox[0] - prev_bbox[2]) > 20  # loncat jauh ke kanan -> kolom lain
 
+        # Sebagian PDF (biasanya hasil export dari Word/Google Docs/dsb) nulis baris kosong
+        # pemisah paragraf pakai karakter tak-kasat-mata kayak zero-width space (U+200B),
+        # bukan spasi biasa. str.strip() Python GAK nganggep itu whitespace, jadi baris
+        # "kosong" model gini lolos dari deteksi blank-line di atas & dua paragraf yang
+        # harusnya kepisah malah nempel lagi jadi satu blok gede (bug yang sama kayak
+        # sebelumnya, cuma nyamar). Makanya dibuang dulu di sini sebelum dicek blank apa
+        # nggak, sekalian biar gak nyelip ke teks hasil edit juga.
+        _INVISIBLE_CHARS = "​‌‍﻿"
+
+        def _visible(text):
+            for ch in _INVISIBLE_CHARS:
+                text = text.replace(ch, "")
+            return text
+
         groups = []
         current_group = []
         current_sig = None
         prev_line = None
         for line in block.get("lines", []):
             spans = line.get("spans", [])
-            line_text = "".join(s.get("text", "") for s in spans)
+            line_text = _visible("".join(s.get("text", "") for s in spans))
             if not line_text.strip():
                 if current_group:
                     groups.append(current_group)
@@ -206,7 +220,7 @@ def _parse_text_blocks(raw: dict, page_index: int, id_prefix: str, ocr: bool = F
             xs0, ys0, xs1, ys1 = [], [], [], []
             for line in group_lines:
                 spans = line.get("spans", [])
-                line_text = "".join(s.get("text", "") for s in spans)
+                line_text = _visible("".join(s.get("text", "") for s in spans))
                 if line_text.strip():
                     text_parts.append(line_text)
                 if first_span is None and spans:
