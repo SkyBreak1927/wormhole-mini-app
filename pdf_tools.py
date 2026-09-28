@@ -1156,11 +1156,15 @@ async def pdf_tools_page():
             for (let i = 1; i <= previewCount; i++) {
               const page = await pdf.getPage(i);
               const viewport = page.getViewport({ scale: 0.3 });
+              const outputScale = window.devicePixelRatio || 1;
               const canvas = document.createElement('canvas');
-              canvas.width = viewport.width;
-              canvas.height = viewport.height;
+              canvas.width = Math.floor(viewport.width * outputScale);
+              canvas.height = Math.floor(viewport.height * outputScale);
+              canvas.style.width = viewport.width + 'px';
+              canvas.style.height = viewport.height + 'px';
               const ctx = canvas.getContext('2d');
-              await page.render({ canvasContext: ctx, viewport }).promise;
+              const renderTransform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
+              await page.render({ canvasContext: ctx, viewport, transform: renderTransform }).promise;
 
               const wrap = document.createElement('div');
               wrap.className = 'rotate-thumb';
@@ -1248,11 +1252,15 @@ async def pdf_tools_page():
             for (let i = 1; i <= previewCount; i++) {
               const page = await pdf.getPage(i);
               const viewport = page.getViewport({ scale: 0.3 });
+              const outputScale = window.devicePixelRatio || 1;
               const canvas = document.createElement('canvas');
-              canvas.width = viewport.width;
-              canvas.height = viewport.height;
+              canvas.width = Math.floor(viewport.width * outputScale);
+              canvas.height = Math.floor(viewport.height * outputScale);
+              canvas.style.width = viewport.width + 'px';
+              canvas.style.height = viewport.height + 'px';
               const ctx = canvas.getContext('2d');
-              await page.render({ canvasContext: ctx, viewport }).promise;
+              const renderTransform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
+              await page.render({ canvasContext: ctx, viewport, transform: renderTransform }).promise;
 
               const wrap = document.createElement('div');
               wrap.className = 'split-thumb';
@@ -1416,11 +1424,18 @@ async def pdf_tools_page():
           editScale = Math.min(1.6, Math.max(0.5, containerWidth / baseViewport.width));
           const viewport = pdfPage.getViewport({ scale: editScale });
 
+          // canvas dirender di resolusi asli device (Retina/HiDPI) biar tajam, tapi ukuran
+          // tampilnya (CSS px) tetep sama kayak sebelumnya -- jadi posisi hotspot/mask/textbox
+          // yang masih pakai satuan editScale gak perlu berubah sama sekali
+          const outputScale = window.devicePixelRatio || 1;
           const canvas = document.createElement('canvas');
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
+          canvas.width = Math.floor(viewport.width * outputScale);
+          canvas.height = Math.floor(viewport.height * outputScale);
+          canvas.style.width = viewport.width + 'px';
+          canvas.style.height = viewport.height + 'px';
           const ctx = canvas.getContext('2d');
-          await pdfPage.render({ canvasContext: ctx, viewport }).promise;
+          const renderTransform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
+          await pdfPage.render({ canvasContext: ctx, viewport, transform: renderTransform }).promise;
 
           wrap.innerHTML = '';
           wrap.style.position = 'relative';
