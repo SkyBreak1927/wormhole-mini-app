@@ -1,4 +1,4 @@
-import io, time, json, zipfile, tempfile, os
+import io, time, json, zipfile, tempfile, os, asyncio
 from collections import defaultdict
 from typing import List
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Depends
@@ -103,6 +103,77 @@ def _int_color_to_hex(color_int: int) -> str:
     g = (color_int >> 8) & 255
     b = color_int & 255
     return f"#{r:02x}{g:02x}{b:02x}"
+
+
+# Bahasa yang di-OCR: dokumen kerja user campuran Indonesia & Inggris (mis. surat referensi visa).
+# Format "ind+eng" ini syntax multi-language-nya Tesseract sendiri.
+OCR_LANGUAGES = "ind+eng"
+
+
+def _ocr_page_to_dict(page) -> dict:
+    """
+    Jalankan Tesseract OCR di 1 halaman PDF yang gak punya teks asli (hasil scan/gambar),
+    lalu balikin struktur yang bentuknya SAMA PERSIS kayak page.get_text("dict") biasa --
+    biar bisa lewat jalur parsing blok yang sama persis dengan teks native, gak perlu kode
+    kedua. Ini jalan sinkron & bisa makan waktu beberapa detik per halaman (subprocess ke
+    Tesseract), makanya dipanggil lewat asyncio.to_thread() dari endpoint biar gak nge-block
+    request lain.
+    """
+    tessdata = os.environ.get("TESSDATA_PREFIX") or None
+    try:
+        ocr_textpage = page.get_textpage_ocr(
+            flags=0, language=OCR_LANGUAGES, dpi=150, full=True, tessdata=tessdata,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=503,
+            detail="OCR belum siap di server ini (Tesseract belum terpasang / tessdata tidak ketemu). Coba lagi nanti atau hubungi admin.",
+        ) from e
+    return page.get_text("dict", textpage=ocr_textpage)
+
+
+def _parse_text_blocks(raw: dict, page_index: int, id_prefix: str, ocr: bool = False) -> list:
+    """Ubah hasil page.get_text('dict') (native ATAU dari OCR) jadi list blok siap-edit."""
+    blocks_out = []
+    for b_idx, block in enumerate(raw.get("blocks", [])):
+        if block.get("type") != 0:
+            continue  # lewati blok gambar, scope versi ini teks doang
+
+        text_parts = []
+        first_span = None
+        for line in block.get("lines", []):
+            spans = line.get("spans", [])
+            line_text = "".join(s.get("text", "") for s in spans)
+            if line_text.strip():
+                text_parts.append(line_text)
+            if first_span is None and spans:
+                first_span = spans[0]
+
+        block_text = " ".join(text_parts).strip()
+        if not block_text or first_span is None:
+            continue
+
+        bbox = [round(v, 2) for v in block.get("bbox", [0, 0, 0, 0])]
+        size = round(first_span.get("size", 11.0), 2)
+
+        if ocr:
+            # Bbox dari Tesseract ngepas ketat ke tinta huruf doang, gak ada ruang
+            # ascender/descender kayak font metric PDF asli. Kalau dibiarin, insert_textbox
+            # pas apply selalu gagal muat walaupun font-size-nya udah diperkecil ke minimum.
+            # Kasih ruang tinggi minimum biar teks pengganti beneran bisa kepasang.
+            min_height = round(size * 1.35, 2)
+            if (bbox[3] - bbox[1]) < min_height:
+                bbox[3] = round(bbox[1] + min_height, 2)
+
+        blocks_out.append({
+            "id": f"p{page_index}_{id_prefix}{b_idx}",
+            "bbox": bbox,
+            "text": block_text,
+            "font": first_span.get("font", "Helvetica"),
+            "size": size,
+            "color": _int_color_to_hex(first_span.get("color", 0)),
+        })
+    return blocks_out
 
 
 def parse_page_range(spec: str, total: int) -> List[int]:
@@ -543,6 +614,7 @@ async def pdf_compress(
 
 
 EDIT_TEXT_MAX_PAGES = 30  # render full-size per halaman lebih berat dibanding thumbnail preview biasa
+EDIT_TEXT_OCR_MAX_PAGES = 8  # OCR per halaman bisa makan beberapa detik (subprocess Tesseract), batasi biar request gak timeout
 
 
 @router.post("/pdf/edit/extract")
@@ -561,43 +633,32 @@ async def pdf_edit_extract(
         raise HTTPException(status_code=400, detail=f"Maks {EDIT_TEXT_MAX_PAGES} halaman untuk edit teks.")
 
     pages_out = []
+    ocr_pages_used = 0
     try:
         for page_index in range(doc.page_count):
             page = doc[page_index]
             raw = page.get_text("dict")
-            blocks_out = []
-            for b_idx, block in enumerate(raw.get("blocks", [])):
-                if block.get("type") != 0:
-                    continue  # lewati blok gambar, scope versi ini teks doang
+            blocks_out = _parse_text_blocks(raw, page_index, "b")
+            is_ocr_page = False
 
-                text_parts = []
-                first_span = None
-                for line in block.get("lines", []):
-                    spans = line.get("spans", [])
-                    line_text = "".join(s.get("text", "") for s in spans)
-                    if line_text.strip():
-                        text_parts.append(line_text)
-                    if first_span is None and spans:
-                        first_span = spans[0]
-
-                block_text = " ".join(text_parts).strip()
-                if not block_text or first_span is None:
-                    continue
-
-                bbox = block.get("bbox", [0, 0, 0, 0])
-                blocks_out.append({
-                    "id": f"p{page_index}_b{b_idx}",
-                    "bbox": [round(v, 2) for v in bbox],
-                    "text": block_text,
-                    "font": first_span.get("font", "Helvetica"),
-                    "size": round(first_span.get("size", 11.0), 2),
-                    "color": _int_color_to_hex(first_span.get("color", 0)),
-                })
+            if not blocks_out:
+                # Halaman gak punya teks asli sama sekali -- kemungkinan hasil scan/gambar.
+                # Coba OCR sebagai fallback, biar tetep bisa diedit kayak PDF teks biasa.
+                ocr_pages_used += 1
+                if ocr_pages_used > EDIT_TEXT_OCR_MAX_PAGES:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Terlalu banyak halaman hasil scan (maks {EDIT_TEXT_OCR_MAX_PAGES} halaman scan per file), OCR bisa lama kalau kebanyakan.",
+                    )
+                raw_ocr = await asyncio.to_thread(_ocr_page_to_dict, page)
+                blocks_out = _parse_text_blocks(raw_ocr, page_index, "o", ocr=True)
+                is_ocr_page = True
 
             pages_out.append({
                 "page_index": page_index,
                 "width": round(page.rect.width, 2),
                 "height": round(page.rect.height, 2),
+                "ocr": is_ocr_page,
                 "blocks": blocks_out,
             })
     finally:
@@ -993,6 +1054,9 @@ async def pdf_tools_page():
           '</div>' +
           '<p id="edit-load-status" style="font-size:12px;margin-top:8px"></p>' +
           '<div id="edit-page-nav" style="display:none;margin-top:10px"></div>' +
+          '<p id="edit-ocr-notice" style="display:none;font-size:11px;color:#e0b040;margin-top:8px;' +
+            'padding:6px 8px;background:rgba(224,176,64,0.1);border:1px solid rgba(224,176,64,0.3);border-radius:5px">' +
+            '📄 Halaman ini hasil scan, teksnya dibaca pakai OCR — mungkin ada salah baca, cek ulang sebelum download.</p>' +
           '<div id="edit-canvas-wrap" style="display:none;margin-top:10px"></div>' +
           '<p id="edit-hint" style="font-size:11px;color:#888;margin-top:8px;display:none">' +
             'Klik teks buat edit langsung. Paragraf lain & halaman lain tidak ikut bergeser otomatis — ' +
@@ -1283,10 +1347,11 @@ async def pdf_tools_page():
         async function loadEditFile(file, password) {
           editFile = file;
           editPdfDoc = null;
-          setEditLoadStatus('Membaca PDF...', false);
+          setEditLoadStatus('Membaca PDF... (kalau ada halaman hasil scan, OCR bisa makan beberapa detik ekstra)', false);
           document.getElementById('edit-page-nav').style.display = 'none';
           document.getElementById('edit-canvas-wrap').style.display = 'none';
           document.getElementById('edit-hint').style.display = 'none';
+          document.getElementById('edit-ocr-notice').style.display = 'none';
 
           const form = new FormData();
           form.append('file', file);
@@ -1337,6 +1402,8 @@ async def pdf_tools_page():
           const wrap = document.getElementById('edit-canvas-wrap');
           wrap.style.display = 'block';
           wrap.innerHTML = '<p style="font-size:12px;color:#999;padding:12px">Memuat halaman...</p>';
+          document.getElementById('edit-ocr-notice').style.display =
+            editPagesData[pageIndex].ocr ? 'block' : 'none';
 
           await pdfjsReady;
           if (!editPdfDoc) {
