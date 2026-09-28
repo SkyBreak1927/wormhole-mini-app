@@ -8,4 +8,5 @@ pillow
 pdf2docx
 sqlalchemy
 psycopg2-binary
+psycopg[binary]
 supabase
