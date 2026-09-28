@@ -1384,13 +1384,13 @@ async def pdf_tools_page():
               `width:${(x1 - x0) * editScale}px;min-height:${(y1 - y0) * editScale}px;` +
               `font-family:${family};font-weight:${weight};font-style:${style};` +
               `font-size:${block.size * editScale * 0.82}px;color:${block.color};line-height:1.25;` +
-              `outline:1px dashed transparent;cursor:text;white-space:pre-wrap;word-break:break-word;padding:1px 2px;`;
+              `outline:none;cursor:text;white-space:pre-wrap;word-break:break-word;padding:1px 2px;`;
             div.onfocus = () => {
-              div.style.outlineColor = '#4da3ff';
+              div.style.outline = '1px dashed #4da3ff';
               div.style.background = 'rgba(77,163,255,0.08)';
             };
             div.onblur = () => {
-              div.style.outlineColor = 'transparent';
+              div.style.outline = 'none';
               div.style.background = 'transparent';
               saveEditBlock(block, div);
             };
