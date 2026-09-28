@@ -139,40 +139,88 @@ def _parse_text_blocks(raw: dict, page_index: int, id_prefix: str, ocr: bool = F
         if block.get("type") != 0:
             continue  # lewati blok gambar, scope versi ini teks doang
 
-        text_parts = []
-        first_span = None
+        # MuPDF kadang nge-gabung beberapa paragraf/heading yang letaknya berdekatan jadi SATU
+        # "block" gede (mis. heading + body paragraf + heading berikutnya). Kalau langsung
+        # diratain jadi satu string kayak sebelumnya: (1) baris kosong pemisahnya kebuang abis,
+        # jadi jarak antar-paragraf/heading yang tadinya ngasih tinggi ke kotak edit ikut ilang
+        # -> pas dirender ulang teksnya numpuk pendek & nyisain kotak putih kosong gede di
+        # bawahnya; (2) font/bold cuma diambil dari baris PERTAMA terus dipaksain ke SELURUH
+        # isi block -> paragraf biasa ikut kebold kalau baris pertamanya heading bold. Makanya
+        # di sini block mentahnya dipecah ulang jadi beberapa "paragraf" terpisah: setiap ada
+        # baris kosong (pemisah paragraf yang jelas) ATAU pergantian font/bold antar baris
+        # yang nempel langsung tanpa baris kosong (heading nempel langsung ke body-nya),
+        # biar tiap paragraf/heading punya kotak edit, ukuran, & font sendiri-sendiri
+        # sesuai aslinya, bukan ketuker gabung ke tetangganya.
+        def _line_signature(line):
+            spans = line.get("spans", [])
+            if not spans:
+                return None
+            sp = spans[0]
+            font_name = (sp.get("font") or "")
+            is_bold = bool(sp.get("flags", 0) & 16) or "bold" in font_name.lower()
+            return (font_name, round(sp.get("size", 0.0), 1), is_bold)
+
+        groups = []
+        current_group = []
+        current_sig = None
         for line in block.get("lines", []):
             spans = line.get("spans", [])
             line_text = "".join(s.get("text", "") for s in spans)
-            if line_text.strip():
-                text_parts.append(line_text)
-            if first_span is None and spans:
-                first_span = spans[0]
+            if not line_text.strip():
+                if current_group:
+                    groups.append(current_group)
+                    current_group = []
+                    current_sig = None
+                continue
+            sig = _line_signature(line)
+            if current_group and sig != current_sig:
+                groups.append(current_group)
+                current_group = []
+            current_group.append(line)
+            current_sig = sig
+        if current_group:
+            groups.append(current_group)
 
-        block_text = " ".join(text_parts).strip()
-        if not block_text or first_span is None:
-            continue
+        for sub_idx, group_lines in enumerate(groups):
+            text_parts = []
+            first_span = None
+            xs0, ys0, xs1, ys1 = [], [], [], []
+            for line in group_lines:
+                spans = line.get("spans", [])
+                line_text = "".join(s.get("text", "") for s in spans)
+                if line_text.strip():
+                    text_parts.append(line_text)
+                if first_span is None and spans:
+                    first_span = spans[0]
+                line_bbox = line.get("bbox")
+                if line_bbox:
+                    xs0.append(line_bbox[0]); ys0.append(line_bbox[1])
+                    xs1.append(line_bbox[2]); ys1.append(line_bbox[3])
 
-        bbox = [round(v, 2) for v in block.get("bbox", [0, 0, 0, 0])]
-        size = round(first_span.get("size", 11.0), 2)
+            group_text = " ".join(text_parts).strip()
+            if not group_text or first_span is None or not xs0:
+                continue
 
-        if ocr:
-            # Bbox dari Tesseract ngepas ketat ke tinta huruf doang, gak ada ruang
-            # ascender/descender kayak font metric PDF asli. Kalau dibiarin, insert_textbox
-            # pas apply selalu gagal muat walaupun font-size-nya udah diperkecil ke minimum.
-            # Kasih ruang tinggi minimum biar teks pengganti beneran bisa kepasang.
-            min_height = round(size * 1.35, 2)
-            if (bbox[3] - bbox[1]) < min_height:
-                bbox[3] = round(bbox[1] + min_height, 2)
+            bbox = [round(min(xs0), 2), round(min(ys0), 2), round(max(xs1), 2), round(max(ys1), 2)]
+            size = round(first_span.get("size", 11.0), 2)
 
-        blocks_out.append({
-            "id": f"p{page_index}_{id_prefix}{b_idx}",
-            "bbox": bbox,
-            "text": block_text,
-            "font": first_span.get("font", "Helvetica"),
-            "size": size,
-            "color": _int_color_to_hex(first_span.get("color", 0)),
-        })
+            if ocr:
+                # Bbox dari Tesseract ngepas ketat ke tinta huruf doang, gak ada ruang
+                # ascender/descender kayak font metric PDF asli. Kalau dibiarin, insert_textbox
+                # pas apply selalu gagal muat walaupun font-size-nya udah diperkecil ke minimum.
+                # Kasih ruang tinggi minimum biar teks pengganti beneran bisa kepasang.
+                min_height = round(size * 1.35, 2)
+                if (bbox[3] - bbox[1]) < min_height:
+                    bbox[3] = round(bbox[1] + min_height, 2)
+
+            blocks_out.append({
+                "id": f"p{page_index}_{id_prefix}{b_idx}_{sub_idx}",
+                "bbox": bbox,
+                "text": group_text,
+                "font": first_span.get("font", "Helvetica"),
+                "size": size,
+                "color": _int_color_to_hex(first_span.get("color", 0)),
+            })
     return blocks_out
 
 
