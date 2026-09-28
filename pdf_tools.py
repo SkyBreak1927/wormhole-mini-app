@@ -1464,13 +1464,19 @@ async def pdf_tools_page():
         function mountEditableBlock(wrap, block, text, forcedBottom, autofocus, isOcrBlock) {
           const [x0, y0, x1, y1] = block.bbox;
           const bottom = forcedBottom || y1;
+          // Blok hasil OCR bbox-nya ngepas ketat ke lebar tulisan asli di gambar scan (yang
+          // sering tebal/bold) -- diganti font pengganti generik (Arial/Helvetica reguler) suka
+          // dikit lebih lebar & gampang ke-wrap padahal aslinya muat 1 baris. Kasih sedikit ruang
+          // ekstra lebar biar gak gampang pecah baris buat hal sepele.
+          const widthPad = isOcrBlock ? 1.15 : 1;
+          const boxWidth = (x1 - x0) * editScale * widthPad;
 
           // kotak putih nutupin teks asli, biar teks lama & baru gak keliatan dobel pas edit
           const mask = document.createElement('div');
           mask.className = 'edit-mask';
           mask.dataset.blockId = block.id;
           mask.style.cssText = `position:absolute;left:${x0 * editScale}px;top:${y0 * editScale}px;` +
-            `width:${(x1 - x0) * editScale}px;height:${(bottom - y0) * editScale}px;background:#fff;`;
+            `width:${boxWidth}px;height:${(bottom - y0) * editScale}px;background:#fff;`;
           wrap.appendChild(mask);
 
           const { family, weight, style } = mapFontFamily(block.font);
@@ -1489,7 +1495,7 @@ async def pdf_tools_page():
           div.dataset.origX1 = x1; div.dataset.origBottom = y1;
           div.textContent = text;
           div.style.cssText = `position:absolute;left:${x0 * editScale}px;top:${y0 * editScale}px;` +
-            `width:${(x1 - x0) * editScale}px;min-height:${(y1 - y0) * editScale}px;` +
+            `width:${boxWidth}px;min-height:${(y1 - y0) * editScale}px;` +
             `font-family:${family};font-weight:${weight};font-style:${style};` +
             `font-size:${block.size * editScale * sizeCorrection}px;color:${block.color};line-height:1.25;` +
             `outline:none;cursor:text;white-space:pre-wrap;word-break:break-word;padding:1px 2px;`;
@@ -1497,6 +1503,18 @@ async def pdf_tools_page():
             div.style.outline = '1px dashed #4da3ff';
             div.style.background = 'rgba(77,163,255,0.08)';
           };
+          // Kalau teksnya kepanjangan/wrapping bikin div lebih tinggi dari mask (ini yang
+          // sebelumnya bikin teks scan asli keintip nongol di bawah mask -- bug utamanya), mask
+          // WAJIB ikut tumbuh biar teks asli tetep ketutup penuh. Cuma tumbuh, gak pernah nyusut,
+          // biar gak balik ngintipin punya sendiri.
+          const syncMaskHeight = () => {
+            const neededPx = div.offsetHeight;
+            if (neededPx > mask.offsetHeight) {
+              mask.style.height = neededPx + 'px';
+            }
+          };
+          div.oninput = syncMaskHeight;
+          syncMaskHeight(); // langsung sync begitu dipasang, siapa tau teksnya udah wrap dari awal
           div.onblur = () => {
             div.style.outline = 'none';
             div.style.background = 'transparent';
@@ -1506,7 +1524,7 @@ async def pdf_tools_page():
               // balikin ke render PDF asli (hotspot lagi) biar tampilan gak berubah
               mask.remove();
               div.remove();
-              mountBlockHotspot(wrap, block);
+              mountBlockHotspot(wrap, block, isOcrBlock);
             }
           };
           wrap.appendChild(div);
