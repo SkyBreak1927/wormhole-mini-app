@@ -50,6 +50,61 @@ def safe_read_pdf(content: bytes, password: str = None) -> PdfReader:
         raise HTTPException(status_code=400, detail="Gagal membaca PDF, file mungkin rusak.")
 
 
+def safe_open_pdf_mupdf(content: bytes, password: str = None):
+    try:
+        doc = pymupdf.open(stream=content, filetype="pdf")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Gagal membaca PDF, file mungkin rusak.")
+    if doc.is_encrypted:
+        if not password:
+            doc.close()
+            raise HTTPException(status_code=400, detail="PDF ini terkunci password, isi password dulu.")
+        if not doc.authenticate(password):
+            doc.close()
+            raise HTTPException(status_code=400, detail="Password salah.")
+    return doc
+
+
+def map_font_to_base14(font_name: str) -> str:
+    # PDF bisa pakai font apa saja; kita gak selalu punya akses ke file font aslinya buat
+    # nulis ulang teks baru, jadi dipetakan ke salah satu dari 14 font standar PDF yang
+    # pymupdf selalu bisa render tanpa perlu embed font tambahan. Hasilnya gak 100% identik
+    # ke font asli, tapi ini yang bikin fitur ini jalan tanpa perlu database font eksternal.
+    name = (font_name or "").lower()
+    bold = "bold" in name
+    italic = "italic" in name or "oblique" in name
+    if "times" in name or "serif" in name or "georgia" in name or "garamond" in name or "cambria" in name:
+        if bold and italic:
+            return "tibi"
+        if bold:
+            return "tibo"
+        if italic:
+            return "tiit"
+        return "tiro"
+    if "courier" in name or "mono" in name or "consolas" in name:
+        if bold and italic:
+            return "cobi"
+        if bold:
+            return "cobo"
+        if italic:
+            return "coit"
+        return "cour"
+    if bold and italic:
+        return "hebi"
+    if bold:
+        return "hebo"
+    if italic:
+        return "heit"
+    return "helv"
+
+
+def _int_color_to_hex(color_int: int) -> str:
+    r = (color_int >> 16) & 255
+    g = (color_int >> 8) & 255
+    b = color_int & 255
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
 def parse_page_range(spec: str, total: int) -> List[int]:
     indices = []
     spec = (spec or "").strip()
@@ -487,6 +542,162 @@ async def pdf_compress(
     )
 
 
+EDIT_TEXT_MAX_PAGES = 30  # render full-size per halaman lebih berat dibanding thumbnail preview biasa
+
+
+@router.post("/pdf/edit/extract")
+async def pdf_edit_extract(
+    request: Request,
+    file: UploadFile = File(...),
+    password: str = Form(""),
+    user: dict = Depends(get_current_user),
+):
+    check_pdf_rate_limit(request.client.host)
+    content = await read_pdf_upload(file)
+    doc = safe_open_pdf_mupdf(content, password or None)
+
+    if doc.page_count > EDIT_TEXT_MAX_PAGES:
+        doc.close()
+        raise HTTPException(status_code=400, detail=f"Maks {EDIT_TEXT_MAX_PAGES} halaman untuk edit teks.")
+
+    pages_out = []
+    try:
+        for page_index in range(doc.page_count):
+            page = doc[page_index]
+            raw = page.get_text("dict")
+            blocks_out = []
+            for b_idx, block in enumerate(raw.get("blocks", [])):
+                if block.get("type") != 0:
+                    continue  # lewati blok gambar, scope versi ini teks doang
+
+                text_parts = []
+                first_span = None
+                for line in block.get("lines", []):
+                    spans = line.get("spans", [])
+                    line_text = "".join(s.get("text", "") for s in spans)
+                    if line_text.strip():
+                        text_parts.append(line_text)
+                    if first_span is None and spans:
+                        first_span = spans[0]
+
+                block_text = " ".join(text_parts).strip()
+                if not block_text or first_span is None:
+                    continue
+
+                bbox = block.get("bbox", [0, 0, 0, 0])
+                blocks_out.append({
+                    "id": f"p{page_index}_b{b_idx}",
+                    "bbox": [round(v, 2) for v in bbox],
+                    "text": block_text,
+                    "font": first_span.get("font", "Helvetica"),
+                    "size": round(first_span.get("size", 11.0), 2),
+                    "color": _int_color_to_hex(first_span.get("color", 0)),
+                })
+
+            pages_out.append({
+                "page_index": page_index,
+                "width": round(page.rect.width, 2),
+                "height": round(page.rect.height, 2),
+                "blocks": blocks_out,
+            })
+    finally:
+        doc.close()
+
+    return {"page_count": len(pages_out), "pages": pages_out}
+
+
+@router.post("/pdf/edit/apply")
+async def pdf_edit_apply(
+    request: Request,
+    file: UploadFile = File(...),
+    password: str = Form(""),
+    edits: str = Form(...),
+    user: dict = Depends(get_current_user),
+):
+    check_pdf_rate_limit(request.client.host)
+    content = await read_pdf_upload(file)
+    doc = safe_open_pdf_mupdf(content, password or None)
+
+    try:
+        edit_list = json.loads(edits)
+        if not isinstance(edit_list, list):
+            raise ValueError
+    except (ValueError, TypeError):
+        doc.close()
+        raise HTTPException(status_code=400, detail="Data edit tidak valid.")
+
+    if not edit_list:
+        doc.close()
+        raise HTTPException(status_code=400, detail="Tidak ada perubahan teks untuk diterapkan.")
+
+    edits_by_page = defaultdict(list)
+    for e in edit_list:
+        try:
+            page_index = int(e["page_index"])
+            bbox = e["bbox"]
+            text = str(e.get("text", ""))
+            font = str(e.get("font", "Helvetica"))
+            size = float(e.get("size", 11.0))
+            color_hex = str(e.get("color", "#000000"))
+            new_bottom_y = e.get("new_bottom_y")
+            new_bottom_y = float(new_bottom_y) if new_bottom_y is not None else None
+        except (KeyError, ValueError, TypeError):
+            doc.close()
+            raise HTTPException(status_code=400, detail="Data edit tidak valid.")
+
+        if page_index < 0 or page_index >= doc.page_count:
+            doc.close()
+            raise HTTPException(status_code=400, detail=f"Halaman {page_index + 1} di luar batas dokumen.")
+        if not (isinstance(bbox, list) and len(bbox) == 4):
+            doc.close()
+            raise HTTPException(status_code=400, detail="Posisi teks tidak valid.")
+
+        edits_by_page[page_index].append({
+            "bbox": bbox, "text": text, "font": font, "size": size,
+            "color": color_hex, "new_bottom_y": new_bottom_y,
+        })
+
+    try:
+        for page_index, page_edits in edits_by_page.items():
+            page = doc[page_index]
+            rects_info = []
+            for pe in page_edits:
+                x0, y0, x1, y1 = pe["bbox"]
+                bottom = pe["new_bottom_y"] if (pe["new_bottom_y"] and pe["new_bottom_y"] > y1) else y1
+                rect = pymupdf.Rect(x0, y0, x1, bottom)
+                page.add_redact_annot(rect, fill=(1, 1, 1))
+                rects_info.append((rect, pe))
+
+            page.apply_redactions()  # hapus permanen teks lama di area yang di-redact, baru boleh nulis ulang
+
+            for rect, pe in rects_info:
+                if not pe["text"].strip():
+                    continue  # dikosongkan user -> cukup dihapus, gak perlu nulis apa-apa
+                r, g, b = parse_hex_color(pe["color"])
+                fontname = map_font_to_base14(pe["font"])
+                fontsize = pe["size"]
+                while fontsize >= 6:
+                    rc = page.insert_textbox(rect, pe["text"], fontsize=fontsize, fontname=fontname, color=(r, g, b), align=0)
+                    if rc >= 0:
+                        break
+                    fontsize -= 0.5  # teks gak muat di kotak -> kecilin font bertahap sampai muat
+    except HTTPException:
+        raise
+    except Exception:
+        doc.close()
+        raise HTTPException(status_code=400, detail="Gagal menerapkan perubahan teks.")
+
+    output = io.BytesIO()
+    doc.save(output, garbage=4, deflate=True)
+    doc.close()
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="text-edited.pdf"'},
+    )
+
+
 @router.get("/pdf-tools", response_class=HTMLResponse)
 async def pdf_tools_page():
     return """
@@ -514,9 +725,15 @@ async def pdf_tools_page():
       #tool-submit:disabled{opacity:0.5;cursor:not-allowed}
       #tool-status{margin-top:10px;font-size:13px;text-align:center}
       a.back-link{color:#888;font-size:13px;margin-bottom:16px;text-decoration:none}
-      #merge-zone,#rotate-zone,#split-zone{border:2px dashed #555;border-radius:10px;padding:16px;text-align:center;cursor:pointer;
+      #merge-zone,#rotate-zone,#split-zone,#edit-zone{border:2px dashed #555;border-radius:10px;padding:16px;text-align:center;cursor:pointer;
                   font-size:13px;color:#999;margin-top:6px;transition:border-color 0.15s}
-      #merge-zone.hover,#rotate-zone.hover,#split-zone.hover{border-color:#4da3ff;color:#4da3ff}
+      #merge-zone.hover,#rotate-zone.hover,#split-zone.hover,#edit-zone.hover{border-color:#4da3ff;color:#4da3ff}
+      #edit-page-nav{display:flex;gap:6px;flex-wrap:wrap}
+      .edit-page-btn{padding:5px 12px;border-radius:16px;border:1px solid #444;background:#1a1a1c;
+                  color:#ccc;font-size:12px;cursor:pointer}
+      .edit-page-btn.active{background:#4da3ff;border-color:#4da3ff;color:#fff}
+      #edit-canvas-wrap{border:1px solid #333;border-radius:8px;max-width:100%;overflow:auto}
+      .edit-block{transition:outline-color 0.1s,background 0.1s}
       #merge-file-list{margin-top:10px}
       .merge-item{display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid #333;
                   border-radius:6px;margin-bottom:6px;font-size:12px}
@@ -605,6 +822,7 @@ async def pdf_tools_page():
         <div class="tool-card" data-tool="protect" data-cat="security"><span class="tool-icon">🔒</span>Protect</div>
         <div class="tool-card" data-tool="unlock" data-cat="security"><span class="tool-icon">🔓</span>Unlock</div>
         <div class="tool-card" data-tool="watermark" data-cat="edit"><span class="tool-icon">💧</span>Watermark</div>
+        <div class="tool-card" data-tool="edit-text" data-cat="edit"><span class="tool-icon">✏️</span>Edit Teks</div>
       </div>
 
       <div id="tool-form">
@@ -763,6 +981,22 @@ async def pdf_tools_page():
             '<input type="text" id="split-manual-input" placeholder="45,50-52">' +
           '</div>';
 
+        const EDIT_TEXT_FIELDS_HTML =
+          '<label>Pilih file PDF, lalu klik paragraf yang mau diedit</label>' +
+          '<div id="edit-zone">Klik atau drop file PDF di sini<input id="edit-file-input" type="file" accept="application/pdf" style="display:none"></div>' +
+          '<div id="edit-password-block" style="display:none">' +
+            '<label>Password PDF (file ini terkunci)</label>' +
+            '<div class="pw-wrap"><input type="password" id="edit-password">' + PW_TOGGLE_HTML + '</div>' +
+            '<button type="button" id="edit-password-retry" style="margin-top:6px;padding:6px 14px;background:#222;' +
+              'border:1px solid #444;border-radius:5px;color:#eee;cursor:pointer;font-size:12px">Coba Lagi</button>' +
+          '</div>' +
+          '<p id="edit-load-status" style="font-size:12px;margin-top:8px"></p>' +
+          '<div id="edit-page-nav" style="display:none;margin-top:10px"></div>' +
+          '<div id="edit-canvas-wrap" style="display:none;margin-top:10px"></div>' +
+          '<p id="edit-hint" style="font-size:11px;color:#888;margin-top:8px;display:none">' +
+            'Klik teks buat edit langsung. Paragraf lain & halaman lain tidak ikut bergeser otomatis — ' +
+            'pastikan hasil yang lebih panjang tidak menabrak konten di bawahnya.</p>';
+
         const MAX_PREVIEW_PAGES = 30;
 
         let activeTool = null;
@@ -773,6 +1007,12 @@ async def pdf_tools_page():
         let splitFile = null;
         let selectedPages = {};
         let splitPageCount = 0;
+        let editFile = null;
+        let editPdfDoc = null;
+        let editPagesData = null;
+        let editCurrentPage = 0;
+        let editEditedBlocks = {};
+        let editScale = 1;
 
         const toolForm = document.getElementById('tool-form');
         const formFields = document.getElementById('form-fields');
@@ -1019,6 +1259,192 @@ async def pdf_tools_page():
           };
         }
 
+        function mapFontFamily(fontName) {
+          const name = (fontName || '').toLowerCase();
+          const bold = name.includes('bold');
+          const italic = name.includes('italic') || name.includes('oblique');
+          let family = 'Helvetica, Arial, sans-serif';
+          if (name.includes('times') || name.includes('serif') || name.includes('georgia') || name.includes('garamond')) {
+            family = 'Georgia, "Times New Roman", serif';
+          } else if (name.includes('courier') || name.includes('mono') || name.includes('consolas')) {
+            family = '"Courier New", monospace';
+          }
+          return { family, weight: bold ? '700' : '400', style: italic ? 'italic' : 'normal' };
+        }
+
+        function setEditLoadStatus(msg, isError) {
+          const el = document.getElementById('edit-load-status');
+          if (!el) return;
+          el.textContent = msg;
+          el.style.color = isError ? '#ff6b6b' : '#999';
+        }
+
+        async function loadEditFile(file, password) {
+          editFile = file;
+          editPdfDoc = null;
+          setEditLoadStatus('Membaca PDF...', false);
+          document.getElementById('edit-page-nav').style.display = 'none';
+          document.getElementById('edit-canvas-wrap').style.display = 'none';
+          document.getElementById('edit-hint').style.display = 'none';
+
+          const form = new FormData();
+          form.append('file', file);
+          if (password) form.append('password', password);
+
+          try {
+            const res = await fetch('/pdf/edit/extract', {
+              method: 'POST',
+              headers: { 'Authorization': 'Bearer ' + getAccessToken() },
+              body: form,
+            });
+            const data = await res.json();
+            if (!res.ok) {
+              if ((data.detail || '').toLowerCase().includes('password')) {
+                document.getElementById('edit-password-block').style.display = 'block';
+                document.getElementById('edit-password').focus();
+              }
+              throw new Error(data.detail || 'Gagal membaca PDF');
+            }
+            document.getElementById('edit-password-block').style.display = 'none';
+            editPagesData = data.pages;
+            editCurrentPage = 0;
+            editEditedBlocks = {};
+            setEditLoadStatus('', false);
+            renderEditNav();
+            await renderEditPage(0);
+            document.getElementById('edit-hint').style.display = 'block';
+          } catch (err) {
+            setEditLoadStatus(err.message, true);
+          }
+        }
+
+        function renderEditNav() {
+          const nav = document.getElementById('edit-page-nav');
+          if (!editPagesData || editPagesData.length <= 1) { nav.style.display = 'none'; return; }
+          nav.style.display = 'flex';
+          nav.innerHTML = editPagesData.map((p, i) =>
+            `<button type="button" class="edit-page-btn${i === editCurrentPage ? ' active' : ''}" data-page="${i}">Hal. ${i + 1}</button>`
+          ).join('');
+          nav.querySelectorAll('.edit-page-btn').forEach(btn => {
+            btn.onclick = () => renderEditPage(parseInt(btn.dataset.page));
+          });
+        }
+
+        async function renderEditPage(pageIndex) {
+          editCurrentPage = pageIndex;
+          renderEditNav();
+          const wrap = document.getElementById('edit-canvas-wrap');
+          wrap.style.display = 'block';
+          wrap.innerHTML = '<p style="font-size:12px;color:#999;padding:12px">Memuat halaman...</p>';
+
+          await pdfjsReady;
+          if (!editPdfDoc) {
+            const buf = await editFile.arrayBuffer();
+            editPdfDoc = await window.pdfjsLib.getDocument({ data: buf }).promise;
+          }
+          const pdfPage = await editPdfDoc.getPage(pageIndex + 1);
+          const baseViewport = pdfPage.getViewport({ scale: 1 });
+          const containerWidth = (toolForm.clientWidth || 480) - 4;
+          editScale = Math.min(1.6, Math.max(0.5, containerWidth / baseViewport.width));
+          const viewport = pdfPage.getViewport({ scale: editScale });
+
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const ctx = canvas.getContext('2d');
+          await pdfPage.render({ canvasContext: ctx, viewport }).promise;
+
+          wrap.innerHTML = '';
+          wrap.style.position = 'relative';
+          wrap.style.width = viewport.width + 'px';
+          wrap.style.height = viewport.height + 'px';
+          wrap.appendChild(canvas);
+
+          const pageData = editPagesData[pageIndex];
+          pageData.blocks.forEach(block => {
+            const [x0, y0, x1, y1] = block.bbox;
+            const editState = editEditedBlocks[block.id];
+            const bottom = editState ? editState.new_bottom_y : y1;
+
+            // kotak putih nutupin teks asli, biar teks lama & baru gak keliatan dobel pas edit
+            const mask = document.createElement('div');
+            mask.style.cssText = `position:absolute;left:${x0 * editScale}px;top:${y0 * editScale}px;` +
+              `width:${(x1 - x0) * editScale}px;height:${(bottom - y0) * editScale}px;background:#fff;`;
+            wrap.appendChild(mask);
+
+            const { family, weight, style } = mapFontFamily(block.font);
+            const div = document.createElement('div');
+            div.className = 'edit-block';
+            div.contentEditable = 'true';
+            div.dataset.blockId = block.id;
+            div.dataset.origX0 = x0; div.dataset.origY0 = y0;
+            div.dataset.origX1 = x1; div.dataset.origBottom = y1;
+            div.textContent = editState ? editState.text : block.text;
+            div.style.cssText = `position:absolute;left:${x0 * editScale}px;top:${y0 * editScale}px;` +
+              `width:${(x1 - x0) * editScale}px;min-height:${(y1 - y0) * editScale}px;` +
+              `font-family:${family};font-weight:${weight};font-style:${style};` +
+              `font-size:${block.size * editScale * 0.82}px;color:${block.color};line-height:1.25;` +
+              `outline:1px dashed transparent;cursor:text;white-space:pre-wrap;word-break:break-word;padding:1px 2px;`;
+            div.onfocus = () => {
+              div.style.outlineColor = '#4da3ff';
+              div.style.background = 'rgba(77,163,255,0.08)';
+            };
+            div.onblur = () => {
+              div.style.outlineColor = 'transparent';
+              div.style.background = 'transparent';
+              saveEditBlock(block, div);
+            };
+            wrap.appendChild(div);
+          });
+        }
+
+        function saveEditBlock(block, div) {
+          const newText = div.textContent;
+          const x0 = parseFloat(div.dataset.origX0);
+          const y0 = parseFloat(div.dataset.origY0);
+          const x1 = parseFloat(div.dataset.origX1);
+          const origBottom = parseFloat(div.dataset.origBottom);
+          const renderedHeightPt = div.offsetHeight / editScale;
+          const newBottomY = Math.max(origBottom, y0 + renderedHeightPt);
+
+          if (newText.trim() === block.text.trim()) {
+            delete editEditedBlocks[block.id];
+            return;
+          }
+          editEditedBlocks[block.id] = {
+            page_index: editCurrentPage,
+            id: block.id,
+            bbox: [x0, y0, x1, origBottom],
+            new_bottom_y: newBottomY,
+            text: newText,
+            font: block.font,
+            size: block.size,
+            color: block.color,
+          };
+        }
+
+        function setupEditZone() {
+          const zone = document.getElementById('edit-zone');
+          const input = document.getElementById('edit-file-input');
+          if (!zone || !input) return;
+
+          zone.onclick = () => input.click();
+          input.onchange = () => { if (input.files[0]) loadEditFile(input.files[0]); };
+          zone.ondragover = e => { e.preventDefault(); zone.classList.add('hover'); };
+          zone.ondragleave = () => zone.classList.remove('hover');
+          zone.ondrop = e => {
+            e.preventDefault();
+            zone.classList.remove('hover');
+            const f = e.dataTransfer.files[0];
+            if (f && f.type === 'application/pdf') loadEditFile(f);
+          };
+
+          document.getElementById('edit-password-retry').onclick = () => {
+            const pw = document.getElementById('edit-password').value;
+            if (editFile) loadEditFile(editFile, pw);
+          };
+        }
+
         document.querySelectorAll('.cat-tab').forEach(tab => {
           tab.onclick = () => {
             document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
@@ -1053,6 +1479,13 @@ async def pdf_tools_page():
               selectedPages = {};
               formFields.innerHTML = SPLIT_FIELDS_HTML;
               setupSplitZone();
+            } else if (activeTool === 'edit-text') {
+              editFile = null;
+              editPdfDoc = null;
+              editPagesData = null;
+              editEditedBlocks = {};
+              formFields.innerHTML = EDIT_TEXT_FIELDS_HTML;
+              setupEditZone();
             } else {
               formFields.innerHTML = SIMPLE_TOOLS[activeTool].fields;
               if (activeTool === 'watermark') setupPositionGrid();
@@ -1194,6 +1627,24 @@ async def pdf_tools_page():
             form.append('pages', pagesSpec);
             endpoint = '/pdf/split';
             filename = 'extracted.pdf';
+          } else if (activeTool === 'edit-text') {
+            if (!editFile) {
+              toolStatus.textContent = 'Pilih file PDF dulu.';
+              toolStatus.style.color = '#ff6b6b';
+              return;
+            }
+            const editsPayload = Object.values(editEditedBlocks);
+            if (editsPayload.length === 0) {
+              toolStatus.textContent = 'Belum ada perubahan teks. Klik salah satu paragraf buat mulai edit.';
+              toolStatus.style.color = '#ff6b6b';
+              return;
+            }
+            form.append('file', editFile);
+            form.append('edits', JSON.stringify(editsPayload));
+            const pwInput = document.getElementById('edit-password');
+            if (pwInput && pwInput.value) form.append('password', pwInput.value);
+            endpoint = '/pdf/edit/apply';
+            filename = 'text-edited.pdf';
           } else {
             const tool = SIMPLE_TOOLS[activeTool];
             let hasFile = false;
@@ -1221,7 +1672,8 @@ async def pdf_tools_page():
           toolStatus.textContent = '';
           updateProgress(0, 'Mengupload... 0%');
 
-          const toolConfig = (activeTool !== 'merge' && activeTool !== 'rotate' && activeTool !== 'split') ? SIMPLE_TOOLS[activeTool] : null;
+          const customTools = ['merge', 'rotate', 'split', 'edit-text'];
+          const toolConfig = !customTools.includes(activeTool) ? SIMPLE_TOOLS[activeTool] : null;
           const timeoutMs = toolConfig && toolConfig.timeout ? toolConfig.timeout : 180000;
 
           try {
