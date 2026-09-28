@@ -155,11 +155,28 @@ def _parse_text_blocks(raw: dict, page_index: int, id_prefix: str, ocr: bool = F
         # sama pengecekan font di atas; makanya perlu dicek jaraknya juga). Biar tiap
         # paragraf/heading/kolom tabel punya kotak edit, ukuran, & font sendiri-sendiri
         # sesuai aslinya, bukan ketuker gabung ke tetangganya.
+        def _representative_span(spans):
+            # Jangan asal ambil span PERTAMA buat mewakili gaya satu baris/paragraf --
+            # kadang ada bullet/ikon kecil (mis. simbol checkbox '☑') yang nempel duluan
+            # di font & ukuran yang beda banget dari isi tulisannya sendiri (mis. font
+            # simbol size 12pt, padahal badan tulisannya 11pt). Kalau dipaksa ambil span
+            # pertama, ukuran/font ikon kecil itu malah kepake buat SELURUH baris pas
+            # dirender ulang -- teksnya jadi kegedean & gampang ke-wrap gara-gara satu
+            # karakter ikon doang. Makanya pilih span dengan teks TERPANJANG sebagai
+            # wakil gaya baris/paragrafnya, bukan span pertama.
+            best, best_len = None, -1
+            for sp in spans:
+                length = len((sp.get("text") or "").strip())
+                if length > best_len:
+                    best_len = length
+                    best = sp
+            return best
+
         def _line_signature(line):
             spans = line.get("spans", [])
             if not spans:
                 return None
-            sp = spans[0]
+            sp = _representative_span(spans) or spans[0]
             font_name = (sp.get("font") or "")
             is_bold = bool(sp.get("flags", 0) & 16) or "bold" in font_name.lower()
             return (font_name, round(sp.get("size", 0.0), 1), is_bold)
@@ -216,26 +233,28 @@ def _parse_text_blocks(raw: dict, page_index: int, id_prefix: str, ocr: bool = F
 
         for sub_idx, group_lines in enumerate(groups):
             text_parts = []
-            first_span = None
+            all_spans = []
             xs0, ys0, xs1, ys1 = [], [], [], []
             for line in group_lines:
                 spans = line.get("spans", [])
                 line_text = _visible("".join(s.get("text", "") for s in spans))
                 if line_text.strip():
                     text_parts.append(line_text)
-                if first_span is None and spans:
-                    first_span = spans[0]
+                all_spans.extend(spans)
                 line_bbox = line.get("bbox")
                 if line_bbox:
                     xs0.append(line_bbox[0]); ys0.append(line_bbox[1])
                     xs1.append(line_bbox[2]); ys1.append(line_bbox[3])
 
             group_text = " ".join(text_parts).strip()
-            if not group_text or first_span is None or not xs0:
+            # font/size/color kotak edit diambil dari span TERPANJANG di grup ini (bukan span
+            # pertama) -- biar bullet/ikon kecil kayak checkbox gak nyetir gaya seluruh baris.
+            rep_span = _representative_span(all_spans)
+            if not group_text or rep_span is None or not xs0:
                 continue
 
             bbox = [round(min(xs0), 2), round(min(ys0), 2), round(max(xs1), 2), round(max(ys1), 2)]
-            size = round(first_span.get("size", 11.0), 2)
+            size = round(rep_span.get("size", 11.0), 2)
 
             if ocr:
                 # Bbox dari Tesseract ngepas ketat ke tinta huruf doang, gak ada ruang
@@ -250,9 +269,9 @@ def _parse_text_blocks(raw: dict, page_index: int, id_prefix: str, ocr: bool = F
                 "id": f"p{page_index}_{id_prefix}{b_idx}_{sub_idx}",
                 "bbox": bbox,
                 "text": group_text,
-                "font": first_span.get("font", "Helvetica"),
+                "font": rep_span.get("font", "Helvetica"),
                 "size": size,
-                "color": _int_color_to_hex(first_span.get("color", 0)),
+                "color": _int_color_to_hex(rep_span.get("color", 0)),
             })
     return blocks_out
 
