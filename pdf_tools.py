@@ -1434,16 +1434,16 @@ async def pdf_tools_page():
             if (editState) {
               // blok ini udah pernah diedit sebelumnya: mask + teks baru wajib tetep kepasang,
               // biar teks asli yang ketutup gak nongol dobel sama teks hasil editan
-              mountEditableBlock(wrap, block, editState.text, editState.new_bottom_y, false);
+              mountEditableBlock(wrap, block, editState.text, editState.new_bottom_y, false, pageData.ocr);
             } else {
               // default: render asli PDF (canvas) dibiarin apa adanya, cuma dikasih
               // "hotspot" tak kasat mata buat nandain area yang bisa diklik buat diedit
-              mountBlockHotspot(wrap, block);
+              mountBlockHotspot(wrap, block, pageData.ocr);
             }
           });
         }
 
-        function mountBlockHotspot(wrap, block) {
+        function mountBlockHotspot(wrap, block, isOcrBlock) {
           const [x0, y0, x1, y1] = block.bbox;
           const hotspot = document.createElement('div');
           hotspot.className = 'edit-hotspot';
@@ -1456,12 +1456,12 @@ async def pdf_tools_page():
           hotspot.onclick = () => {
             const editState = editEditedBlocks[block.id];
             hotspot.remove();
-            mountEditableBlock(wrap, block, editState ? editState.text : block.text, editState ? editState.new_bottom_y : null, true);
+            mountEditableBlock(wrap, block, editState ? editState.text : block.text, editState ? editState.new_bottom_y : null, true, isOcrBlock);
           };
           wrap.appendChild(hotspot);
         }
 
-        function mountEditableBlock(wrap, block, text, forcedBottom, autofocus) {
+        function mountEditableBlock(wrap, block, text, forcedBottom, autofocus, isOcrBlock) {
           const [x0, y0, x1, y1] = block.bbox;
           const bottom = forcedBottom || y1;
 
@@ -1474,9 +1474,16 @@ async def pdf_tools_page():
           wrap.appendChild(mask);
 
           const { family, weight, style } = mapFontFamily(block.font);
+          // Faktor 0.82 ini koreksi buat font vektor PDF asli yang dirender via CSS (Helvetica/
+          // Arial cenderung kegedean dibanding metric PDF point-size aslinya). Blok hasil OCR
+          // udah punya font-size perkiraan dari tinggi baris tulisan di gambar scan-nya --
+          // kalau dikalikan 0.82 lagi, teksnya jadi keliatan mini & janggal dibanding baris lain
+          // yang masih gambar asli. Jadi koreksi ini cuma dipakai buat blok teks native.
+          const sizeCorrection = isOcrBlock ? 1 : 0.82;
           const div = document.createElement('div');
           div.className = 'edit-block';
           div.contentEditable = 'true';
+          div.spellcheck = false; // biar nama orang/istilah asing gak digarisbawahin merah, ganggu tampilan
           div.dataset.blockId = block.id;
           div.dataset.origX0 = x0; div.dataset.origY0 = y0;
           div.dataset.origX1 = x1; div.dataset.origBottom = y1;
@@ -1484,7 +1491,7 @@ async def pdf_tools_page():
           div.style.cssText = `position:absolute;left:${x0 * editScale}px;top:${y0 * editScale}px;` +
             `width:${(x1 - x0) * editScale}px;min-height:${(y1 - y0) * editScale}px;` +
             `font-family:${family};font-weight:${weight};font-style:${style};` +
-            `font-size:${block.size * editScale * 0.82}px;color:${block.color};line-height:1.25;` +
+            `font-size:${block.size * editScale * sizeCorrection}px;color:${block.color};line-height:1.25;` +
             `outline:none;cursor:text;white-space:pre-wrap;word-break:break-word;padding:1px 2px;`;
           div.onfocus = () => {
             div.style.outline = '1px dashed #4da3ff';
