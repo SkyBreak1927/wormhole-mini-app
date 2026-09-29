@@ -1586,12 +1586,25 @@ async def pdf_tools_page():
           const widthPad = isOcrBlock ? 1.15 : 1;
           const boxWidth = (x1 - x0) * editScale * widthPad;
 
+          // Div teksnya dikasih CSS padding:1px 2px (liat di bawah) biar tulisan gak nempel
+          // pas-pasan ke tepi kotak. Tapi padding itu NAMBAH ukuran kotak yang beneran
+          // dirender di layar (2px total tinggi, 4px total lebar) -- kalau mask putihnya
+          // disamain persis sama lebar/tinggi box aslinya (tanpa itung padding), sisa 2-4px
+          // di pinggir/bawah kotak jadi GAK ketutup, nyisain sliver tipis teks/gambar asli
+          // (scan atau PDF asli) keintip nongol pas-pasan langsung di sebelah teks hasil edit.
+          // Efeknya keliatan kayak tulisan "kotor"/blur/dobel, atau kayak ada huruf yang
+          // "kepotong" -- padahal teks hasil editnya sendiri lengkap, cuma ketutup separuh
+          // sama sisa pixel lama di baliknya. Makanya mask WAJIB dilebihin sebesar padding
+          // div-nya juga, biar bener-bener nutup penuh area yang dipakai div.
+          const padX = 4; // padding kiri+kanan div (2px + 2px)
+          const padY = 2; // padding atas+bawah div (1px + 1px)
+
           // kotak putih nutupin teks asli, biar teks lama & baru gak keliatan dobel pas edit
           const mask = document.createElement('div');
           mask.className = 'edit-mask';
           mask.dataset.blockId = block.id;
           mask.style.cssText = `position:absolute;left:${x0 * editScale}px;top:${y0 * editScale}px;` +
-            `width:${boxWidth}px;height:${(bottom - y0) * editScale}px;background:#fff;`;
+            `width:${boxWidth + padX}px;height:${(bottom - y0) * editScale + padY}px;background:#fff;`;
           wrap.appendChild(mask);
 
           const { family, weight, style } = mapFontFamily(block.font);
@@ -1631,7 +1644,6 @@ async def pdf_tools_page():
             }
           };
           div.oninput = syncMaskHeight;
-          syncMaskHeight(); // langsung sync begitu dipasang, siapa tau teksnya udah wrap dari awal
           div.onblur = () => {
             div.style.outline = 'none';
             div.style.background = 'transparent';
@@ -1645,6 +1657,10 @@ async def pdf_tools_page():
             }
           };
           wrap.appendChild(div);
+          // Baru diukur SESUDAH div beneran nempel di DOM -- div yang belum di-appendChild
+          // belum punya layout box sama sekali, jadi offsetHeight-nya selalu kebaca 0 & mask
+          // gak pernah ikut tumbuh biarpun teksnya udah wrap ke banyak baris sejak awal dipasang.
+          syncMaskHeight();
           if (autofocus) {
             div.focus();
             const range = document.createRange();
