@@ -10,12 +10,14 @@ from database import check_db_connection
 from auth import router as auth_router
 from auth import get_current_user, is_super_admin
 from admin import router as admin_router, init_admin
+from usage import UsageMiddleware, purge_usage_loop
 from fastapi import Depends
 
 app = FastAPI()
 app.include_router(pdf_router)
 app.include_router(auth_router)
 app.include_router(admin_router)
+app.add_middleware(UsageMiddleware)
 
 STORAGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage")
 os.makedirs(STORAGE_DIR, exist_ok=True)
@@ -131,6 +133,7 @@ async def cleanup_old_reports_loop():
 async def start_cleanup():
     asyncio.create_task(cleanup_expired_loop())
     asyncio.create_task(cleanup_old_reports_loop())
+    asyncio.create_task(purge_usage_loop())
     if check_db_connection():
         print("[startup] Database connection: OK")
     else:
@@ -163,6 +166,7 @@ async def upload_batch(request: Request, files: List[UploadFile] = File(...), ex
         raise HTTPException(status_code=400, detail=f"Maks {MAX_FILES_PER_BATCH} file per batch")
 
     expires_at = parse_expiry(expiry_minutes)
+    request.state.usage_files = len(files)
     batch_token = secrets.token_urlsafe(16)
     batch_items = [await save_upload(file, expires_at, unlimited) for file in files]
     BATCHES[batch_token] = batch_items

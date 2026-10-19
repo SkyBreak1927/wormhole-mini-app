@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, HTTPException, Header, Depends
+from fastapi import APIRouter, HTTPException, Header, Depends, Request
 from pydantic import BaseModel
 from supabase import create_client, Client
 from sqlalchemy import text
@@ -129,7 +129,7 @@ async def refresh(body: RefreshRequest):
     }
 
 
-async def get_current_user(authorization: str = Header(None)):
+async def get_current_user(request: Request, authorization: str = Header(None)):
     """Dependency: cek token valid DAN belum lewat masa berlaku 7 hari kita sendiri."""
     require_supabase()
     if not authorization or not authorization.startswith("Bearer "):
@@ -161,7 +161,9 @@ async def get_current_user(authorization: str = Header(None)):
     # Super admin: tidak pernah kena ban dan tidak kena batas sesi 7 hari
     # (token Supabase tetap harus valid -- itu dicek di atas).
     if role == SUPER_ADMIN_ROLE:
-        return {"id": user.id, "email": user.email, "role": role}
+        current = {"id": user.id, "email": user.email, "role": role}
+        request.state.user = current  # dibaca UsageMiddleware (super admin tidak dicatat)
+        return current
 
     if is_banned:
         raise HTTPException(status_code=403, detail="Akun ini dinonaktifkan.")
@@ -174,7 +176,9 @@ async def get_current_user(authorization: str = Header(None)):
     if expires_at is None or expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=401, detail="Sesi sudah kadaluarsa, silakan login ulang.")
 
-    return {"id": user.id, "email": user.email, "role": role}
+    current = {"id": user.id, "email": user.email, "role": role}
+    request.state.user = current  # dibaca UsageMiddleware
+    return current
 
 
 SUPER_ADMIN_ROLE = "super_admin"

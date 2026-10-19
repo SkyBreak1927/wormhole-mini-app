@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy import text
@@ -144,6 +145,58 @@ async def audit_log(admin: dict = Depends(require_super_admin)):
     }
 
 
+@router.get("/admin/api/activity")
+async def activity(date: str = "", admin: dict = Depends(require_super_admin)):
+    """Ringkasan aktivitas per user untuk satu hari (zona waktu Asia/Jakarta). Default: hari ini."""
+    require_db()
+    day = date.strip() or None
+    if day:
+        try:
+            datetime.strptime(day, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Format tanggal harus YYYY-MM-DD.")
+    with engine.connect() as conn:
+        if not day:
+            day = conn.execute(text("SELECT (now() AT TIME ZONE 'Asia/Jakarta')::date::text")).scalar()
+        rows = conn.execute(
+            text(
+                "SELECT p.email, e.user_id::text, e.kind, count(*) AS n, "
+                "       coalesce(sum(e.file_count), 0) AS files, coalesce(sum(e.bytes), 0) AS bytes "
+                "FROM usage_events e JOIN profiles p ON p.id = e.user_id "
+                "WHERE (e.created_at AT TIME ZONE 'Asia/Jakarta')::date = CAST(:d AS date) "
+                "GROUP BY p.email, e.user_id, e.kind"
+            ),
+            {"d": day},
+        ).fetchall()
+
+    users = {}
+    for email, uid, kind, n, files, size in rows:
+        u = users.setdefault(
+            uid,
+            {"email": email, "share_actions": 0, "share_files": 0, "pdf_actions": 0, "bytes": 0, "tools": {}},
+        )
+        u["bytes"] += int(size)
+        if kind in ("upload", "upload-batch"):
+            u["share_actions"] += int(n)
+            u["share_files"] += int(files)
+        else:
+            u["pdf_actions"] += int(n)
+            u["tools"][kind] = u["tools"].get(kind, 0) + int(n)
+
+    result = sorted(users.values(), key=lambda u: (u["share_actions"] + u["pdf_actions"]), reverse=True)
+    return {
+        "date": day,
+        "users": result,
+        "totals": {
+            "active_users": len(result),
+            "share_actions": sum(u["share_actions"] for u in result),
+            "share_files": sum(u["share_files"] for u in result),
+            "pdf_actions": sum(u["pdf_actions"] for u in result),
+            "bytes": sum(u["bytes"] for u in result),
+        },
+    }
+
+
 ADMIN_PAGE = """
 <html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
   body{background:#0f0f10;color:#eee;font-family:sans-serif;margin:0;padding:24px 16px;max-width:860px;margin:0 auto}
@@ -158,7 +211,7 @@ ADMIN_PAGE = """
   button.danger{background:#ff6b6b}
   .badge{font-size:11px;padding:2px 6px;border-radius:4px;background:#2a2a2c}
   .badge.sa{background:#4da3ff;color:#fff} .badge.ban{background:#ff6b6b;color:#fff}
-  #msg{font-size:13px;min-height:18px;margin-bottom:10px}
+  #msg{font-size:13px;min-height:18px;margin-bottom:10px}\n  .summary{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}\n  .stat{background:#1a1a1c;border:1px solid #2a2a2c;border-radius:8px;padding:10px 14px;font-size:12px;color:#888}\n  .stat b{display:block;color:#eee;font-size:18px;margin-top:2px}\n  input[type=date]{background:#1a1a1c;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 8px}
   a{color:#4da3ff;text-decoration:none;font-size:13px}
 </style></head><body>
   <a href="/">&larr; Kembali</a>
@@ -167,6 +220,7 @@ ADMIN_PAGE = """
   <div id="msg"></div>
   <div class="tabs">
     <div class="tab active" data-tab="users">User</div>
+    <div class="tab" data-tab="activity">Aktivitas</div>
     <div class="tab" data-tab="files">File aktif</div>
     <div class="tab" data-tab="audit">Audit log</div>
   </div>
@@ -219,6 +273,29 @@ ADMIN_PAGE = """
       });
     }
 
+    function toolsText(t) {
+      return Object.entries(t).map(([k, v]) => k.replace(/^pdf\\//, '').replace(/^image\\//, '') + ' ×' + v).join(', ') || '-';
+    }
+
+    async function showActivity(dateVal) {
+      const q = dateVal ? '?date=' + encodeURIComponent(dateVal) : '';
+      const d = await api('/admin/api/activity' + q);
+      const t = d.totals;
+      content.innerHTML =
+        '<div>Tanggal: <input type="date" id="act-date" value="' + esc(d.date) + '"></div>' +
+        '<div class="summary">' +
+          '<div class="stat">User aktif<b>' + t.active_users + '</b></div>' +
+          '<div class="stat">Kirim file<b>' + t.share_actions + 'x (' + t.share_files + ' file)</b></div>' +
+          '<div class="stat">Layanan PDF<b>' + t.pdf_actions + 'x</b></div>' +
+          '<div class="stat">Total ukuran<b>' + fmtSize(t.bytes) + '</b></div>' +
+        '</div>' +
+        (d.users.length ? '<table><tr><th>Email</th><th>Kirim file</th><th>PDF</th><th>Total ukuran</th><th>Detail PDF</th></tr>' +
+          d.users.map(u => '<tr><td>' + esc(u.email) + '</td><td>' + u.share_actions + 'x (' + u.share_files + ' file)</td><td>' +
+            u.pdf_actions + 'x</td><td>' + fmtSize(u.bytes) + '</td><td>' + esc(toolsText(u.tools)) + '</td></tr>').join('') + '</table>'
+          : '<p style="color:#888">Belum ada aktivitas di tanggal ini.</p>');
+      document.getElementById('act-date').onchange = e => showActivity(e.target.value).catch(err => say(err.message, true));
+    }
+
     async function showAudit() {
       const {log} = await api('/admin/api/audit');
       content.innerHTML = log.length ? '<table><tr><th>Waktu</th><th>Aktor</th><th>Aksi</th><th>Target</th></tr>' + log.map(l =>
@@ -226,7 +303,7 @@ ADMIN_PAGE = """
         : '<p style="color:#888">Belum ada aksi tercatat.</p>';
     }
 
-    const views = {users: showUsers, files: showFiles, audit: showAudit};
+    const views = {users: showUsers, activity: () => showActivity(''), files: showFiles, audit: showAudit};
     function open(name) {
       document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
       msg.textContent = '';
