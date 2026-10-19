@@ -329,22 +329,45 @@ ADMIN_PAGE = """
       return Object.entries(t).map(([k, v]) => k.replace(/^pdf\\//, '').replace(/^image\\//, '') + ' ×' + v).join(', ') || '-';
     }
 
+    function csvCell(v) {
+      let t = String(v ?? '');
+      if (/^[=+\\-@]/.test(t)) t = "'" + t;  // cegah formula injection di Excel
+      return '"' + t.replace(/"/g, '""') + '"';
+    }
+    function downloadActivity(d) {
+      const NL = String.fromCharCode(13, 10);
+      const head = ['No', 'Email', 'Kirim file (aksi)', 'File terkirim', 'PDF (aksi)', 'Total ukuran (KB)', 'Detail PDF'];
+      const rows = d.users.map((u, i) => [i + 1, u.email, u.share_actions, u.share_files, u.pdf_actions,
+        Math.round(u.bytes / 1024), Object.keys(u.tools).length ? toolsText(u.tools) : '']);
+      // baris pertama 'sep=;' supaya Excel (termasuk setelan Indonesia) memisahkan kolom dengan benar
+      const csv = 'sep=;' + NL + [head, ...rows].map(r => r.map(csvCell).join(';')).join(NL);
+      const blob = new Blob(['\ufeff' + csv], {type: 'text/csv;charset=utf-8'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'aktivitas_' + d.date + '.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+
     async function showActivity(dateVal) {
       const q = dateVal ? '?date=' + encodeURIComponent(dateVal) : '';
       const d = await api('/admin/api/activity' + q);
       const t = d.totals;
       content.innerHTML =
-        '<div>Tanggal: <input type="date" id="act-date" value="' + esc(d.date) + '"></div>' +
+        '<div>Tanggal: <input type="date" id="act-date" value="' + esc(d.date) + '"> ' +
+          (d.users.length ? '<button id="act-dl" style="margin-left:8px">&#11015; Download CSV (Excel)</button>' : '') + '</div>' +
         '<div class="summary">' +
           '<div class="stat">User aktif<b>' + t.active_users + '</b></div>' +
           '<div class="stat">Kirim file<b>' + t.share_actions + 'x (' + t.share_files + ' file)</b></div>' +
           '<div class="stat">Layanan PDF<b>' + t.pdf_actions + 'x</b></div>' +
           '<div class="stat">Total ukuran<b>' + fmtSize(t.bytes) + '</b></div>' +
         '</div>' +
-        (d.users.length ? '<table><tr><th>Email</th><th>Kirim file</th><th>PDF</th><th>Total ukuran</th><th>Detail PDF</th></tr>' +
-          d.users.map(u => '<tr><td>' + esc(u.email) + '</td><td>' + u.share_actions + 'x (' + u.share_files + ' file)</td><td>' +
+        (d.users.length ? '<table><tr><th>No</th><th>Email</th><th>Kirim file</th><th>PDF</th><th>Total ukuran</th><th>Detail PDF</th></tr>' +
+          d.users.map((u, i) => '<tr><td>' + (i + 1) + '</td><td>' + esc(u.email) + '</td><td>' + u.share_actions + 'x (' + u.share_files + ' file)</td><td>' +
             u.pdf_actions + 'x</td><td>' + fmtSize(u.bytes) + '</td><td>' + esc(toolsText(u.tools)) + '</td></tr>').join('') + '</table>'
           : '<p style="color:#888">Belum ada aktivitas di tanggal ini.</p>');
+      const dl = document.getElementById('act-dl');
+      if (dl) dl.onclick = () => downloadActivity(d);
       document.getElementById('act-date').onchange = e => showActivity(e.target.value).catch(err => say(err.message, true));
     }
 
