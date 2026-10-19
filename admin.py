@@ -130,6 +130,7 @@ async def list_files(admin: dict = Depends(require_super_admin)):
                 "token": token,
                 "filename": entry.get("filename"),
                 "size": size,
+                "owner": entry.get("owner"),
                 "expires_at": entry.get("expires_at"),
             }
         )
@@ -314,8 +315,8 @@ ADMIN_PAGE = """
     async function showFiles() {
       const {files} = await api('/admin/api/files');
       if (!files.length) { content.innerHTML = '<p style="color:#888">Tidak ada file aktif.</p>'; return; }
-      content.innerHTML = '<table><tr><th>Nama</th><th>Ukuran</th><th>Kadaluarsa</th><th></th></tr>' + files.map(f =>
-        '<tr><td>' + esc(f.filename) + '</td><td>' + fmtSize(f.size) + '</td><td>' +
+      content.innerHTML = '<table><tr><th>No</th><th>Pengirim</th><th>Nama</th><th>Ukuran</th><th>Kadaluarsa</th><th></th></tr>' + files.map((f, i) =>
+        '<tr><td>' + (i + 1) + '</td><td>' + (f.owner ? esc(f.owner) : '<span style="color:#666">tidak diketahui</span>') + '</td><td>' + esc(f.filename) + '</td><td>' + fmtSize(f.size) + '</td><td>' +
         (f.expires_at ? fmtDate(f.expires_at * 1000) : 'sekali unduh') + '</td><td>' +
         '<button class="danger" data-token="' + esc(f.token) + '">Hapus</button></td></tr>').join('') + '</table>';
       content.querySelectorAll('button[data-token]').forEach(b => b.onclick = async () => {
