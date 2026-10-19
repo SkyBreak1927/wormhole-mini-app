@@ -46,25 +46,44 @@ def log_action(actor: dict, action: str, target: str = "", detail: str = ""):
         pass
 
 
+ONLINE_WINDOW_SECONDS = 75  # 2 heartbeat (tiap 30 dtk) + toleransi
+
+
 @router.get("/admin/api/users")
 async def list_users(admin: dict = Depends(require_super_admin)):
     require_db()
     with engine.connect() as conn:
         rows = conn.execute(
-            text("SELECT id, email, role, is_banned, created_at FROM profiles ORDER BY created_at DESC")
+            text(
+                "SELECT id, email, role, is_banned, created_at, last_seen_visible, "
+                "EXTRACT(EPOCH FROM (now() - last_seen_at)) FROM profiles ORDER BY created_at DESC"
+            )
         ).fetchall()
-    return {
-        "users": [
+    users = []
+    for r in rows:
+        ago = float(r[6]) if r[6] is not None else None
+        if r[2] == "super_admin":
+            status = "hidden"  # super admin tidak dilacak
+        elif ago is None:
+            status = "offline"
+        elif ago <= ONLINE_WINDOW_SECONDS:
+            status = "online" if r[5] else "idle"
+        else:
+            status = "offline"
+        users.append(
             {
                 "id": str(r[0]),
                 "email": r[1],
                 "role": r[2],
                 "is_banned": r[3],
                 "created_at": r[4].isoformat() if r[4] else None,
+                "status": status,
+                "last_seen_ago": int(ago) if ago is not None else None,
             }
-            for r in rows
-        ]
-    }
+        )
+    order = {"online": 0, "idle": 1, "offline": 2, "hidden": 3}
+    users.sort(key=lambda u: (order[u["status"]], u["last_seen_ago"] if u["last_seen_ago"] is not None else 10**12))
+    return {"users": users}
 
 
 def _set_ban(user_id: str, banned: bool, admin: dict):
@@ -245,19 +264,51 @@ ADMIN_PAGE = """
     const fmtSize = b => b == null ? '-' : (b / 1048576).toFixed(1) + ' MB';
     const fmtDate = d => d ? new Date(d).toLocaleString() : '-';
 
+    let usersTimer = null;
+    function ago(sec) {
+      if (sec == null) return 'belum pernah';
+      if (sec < 60) return 'baru saja';
+      if (sec < 3600) return Math.floor(sec / 60) + ' menit lalu';
+      if (sec < 86400) return Math.floor(sec / 3600) + ' jam lalu';
+      return Math.floor(sec / 86400) + ' hari lalu';
+    }
+    const LAMP = {
+      online: ['#4dff88', 'Online'], idle: ['#ffc94d', 'Idle (tab di background)'],
+      offline: ['#555', 'Offline'], hidden: ['transparent', 'tidak dilacak']
+    };
+    function lamp(u) {
+      const [c, label] = LAMP[u.status];
+      if (u.status === 'hidden') return '<span style="color:#666">-</span>';
+      const glow = u.status === 'offline' ? '' : 'box-shadow:0 0 6px ' + c + ';';
+      return '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;background:' + c + ';' + glow + '"></span>' +
+        label + (u.status === 'offline' ? ' <span style="color:#666">(' + ago(u.last_seen_ago) + ')</span>' : '');
+    }
+
     async function showUsers() {
+      clearInterval(usersTimer);
       const {users} = await api('/admin/api/users');
-      content.innerHTML = '<table><tr><th>Email</th><th>Role</th><th>Daftar</th><th></th></tr>' + users.map(u =>
-        '<tr><td>' + esc(u.email) + '</td><td><span class="badge ' + (u.role === 'super_admin' ? 'sa' : '') + '">' + esc(u.role) + '</span>' +
+      const nOn = users.filter(u => u.status === 'online').length;
+      const nIdle = users.filter(u => u.status === 'idle').length;
+      content.innerHTML =
+        '<div class="summary"><div class="stat">Online<b style="color:#4dff88">' + nOn + '</b></div>' +
+        '<div class="stat">Idle<b style="color:#ffc94d">' + nIdle + '</b></div>' +
+        '<div class="stat">Total user<b>' + users.length + '</b></div></div>' +
+        '<table><tr><th>Status</th><th>Email</th><th>Role</th><th>Daftar</th><th></th></tr>' + users.map(u =>
+        '<tr><td>' + lamp(u) + '</td><td>' + esc(u.email) + '</td><td><span class="badge ' + (u.role === 'super_admin' ? 'sa' : '') + '">' + esc(u.role) + '</span>' +
         (u.is_banned ? ' <span class="badge ban">banned</span>' : '') + '</td><td>' + fmtDate(u.created_at) + '</td><td>' +
         (u.role === 'super_admin' ? '' :
           (u.is_banned ? '<button data-act="unban" data-id="' + esc(u.id) + '">Unban</button>'
                        : '<button class="danger" data-act="ban" data-id="' + esc(u.id) + '">Ban</button>')) +
-        '</td></tr>').join('') + '</table>';
+        '</td></tr>').join('') + '</table>' +
+        '<p style="color:#666;font-size:12px">Status diperbarui otomatis tiap 30 detik. Offline terdeteksi sekitar 75 detik setelah tab ditutup.</p>';
       content.querySelectorAll('button[data-act]').forEach(b => b.onclick = async () => {
         try { await api('/admin/api/users/' + b.dataset.id + '/' + b.dataset.act, 'POST'); say('Berhasil.'); showUsers(); }
         catch (e) { say(e.message, true); }
       });
+      usersTimer = setInterval(() => {
+        if (document.hidden) return;
+        showUsers().catch(() => {});
+      }, 30000);
     }
 
     async function showFiles() {
@@ -305,6 +356,7 @@ ADMIN_PAGE = """
 
     const views = {users: showUsers, activity: () => showActivity(''), files: showFiles, audit: showAudit};
     function open(name) {
+      clearInterval(usersTimer);
       document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
       msg.textContent = '';
       views[name]().catch(e => { content.innerHTML = ''; say(e.message, true); });

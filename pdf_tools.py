@@ -1043,6 +1043,20 @@ async def pdf_tools_page():
         }
 
         document.getElementById('user-email-display').textContent = localStorage.getItem('user_email') || '';
+
+        // Heartbeat: kasih tahu server bahwa halaman ini sedang terbuka (untuk indikator online di panel admin)
+        let hbStopped = false;
+        function sendHeartbeat() {
+          if (hbStopped) return;
+          fetch('/presence/heartbeat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getAccessToken()},
+            body: JSON.stringify({visible: document.visibilityState === 'visible'})
+          }).then(r => { if (r.status === 403) hbStopped = true; }).catch(() => {});
+        }
+        sendHeartbeat();
+        setInterval(sendHeartbeat, 30000);
+        document.addEventListener('visibilitychange', sendHeartbeat);
         document.getElementById('logout-btn').onclick = async () => {
           try {
             await fetch('/auth/logout', {

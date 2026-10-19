@@ -201,6 +201,26 @@ async def me(user: dict = Depends(get_current_user)):
     return {"email": user["email"], "role": user["role"]}
 
 
+class HeartbeatRequest(BaseModel):
+    visible: bool = True
+
+
+@router.post("/presence/heartbeat")
+async def heartbeat(body: HeartbeatRequest, user: dict = Depends(get_current_user)):
+    """Sinyal 'halaman sedang terbuka' dari browser. Super admin TIDAK dicatat (invisible)."""
+    if is_super_admin(user) or not engine:
+        return {"ok": True}
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE profiles SET last_seen_at = now(), last_seen_visible = :v WHERE id = :id"),
+                {"v": body.visible, "id": user["id"]},
+            )
+    except Exception:
+        pass  # gagal mencatat kehadiran tidak boleh mengganggu user
+    return {"ok": True}
+
+
 class LogoutRequest(BaseModel):
     refresh_token: str = ""
 
