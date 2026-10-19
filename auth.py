@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, Depends
 from pydantic import BaseModel
 from supabase import create_client, Client
 from sqlalchemy import text
@@ -149,14 +149,23 @@ async def get_current_user(authorization: str = Header(None)):
 
     with engine.connect() as conn:
         row = conn.execute(
-            text("SELECT role, session_expires_at FROM profiles WHERE id = :user_id"),
+            text("SELECT role, session_expires_at, is_banned FROM profiles WHERE id = :user_id"),
             {"user_id": user.id},
         ).fetchone()
 
     if not row:
         raise HTTPException(status_code=401, detail="Profil user tidak ditemukan.")
 
-    role, expires_at = row
+    role, expires_at, is_banned = row
+
+    # Super admin: tidak pernah kena ban dan tidak kena batas sesi 7 hari
+    # (token Supabase tetap harus valid -- itu dicek di atas).
+    if role == SUPER_ADMIN_ROLE:
+        return {"id": user.id, "email": user.email, "role": role}
+
+    if is_banned:
+        raise HTTPException(status_code=403, detail="Akun ini dinonaktifkan.")
+
     if expires_at is not None and isinstance(expires_at, str):
         expires_at = datetime.fromisoformat(expires_at)
     if expires_at is not None and expires_at.tzinfo is None:
@@ -168,12 +177,24 @@ async def get_current_user(authorization: str = Header(None)):
     return {"id": user.id, "email": user.email, "role": role}
 
 
-async def require_admin(user: dict = None):
-    if user is None:
-        raise HTTPException(status_code=401, detail="Belum login.")
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Akses ditolak, cuma admin yang boleh.")
+SUPER_ADMIN_ROLE = "super_admin"
+
+
+def is_super_admin(user) -> bool:
+    """Pintu pertama semua pengecekan limit/paywall: True = lolos tanpa batasan apa pun.
+    Role dibaca dari database (bukan dari input client)."""
+    return bool(user) and user.get("role") == SUPER_ADMIN_ROLE
+
+
+async def require_super_admin(user: dict = Depends(get_current_user)):
+    if not is_super_admin(user):
+        raise HTTPException(status_code=403, detail="Akses ditolak.")
     return user
+
+
+@router.get("/auth/me")
+async def me(user: dict = Depends(get_current_user)):
+    return {"email": user["email"], "role": user["role"]}
 
 
 class LogoutRequest(BaseModel):

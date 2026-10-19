@@ -8,7 +8,7 @@ from reportlab.pdfgen import canvas
 import pymupdf
 from PIL import Image
 from pdf2docx import Converter
-from auth import get_current_user
+from auth import get_current_user, is_super_admin
 
 router = APIRouter()
 
@@ -18,7 +18,9 @@ PDF_RATE_WINDOW = 60              # detik
 pdf_rate_log = defaultdict(list)  # ip -> [timestamp]
 
 
-def check_pdf_rate_limit(ip: str):
+def check_pdf_rate_limit(ip: str, user: dict = None):
+    if is_super_admin(user):
+        return
     now = time.time()
     pdf_rate_log[ip] = [t for t in pdf_rate_log[ip] if now - t < PDF_RATE_WINDOW]
     if len(pdf_rate_log[ip]) >= PDF_RATE_LIMIT:
@@ -26,9 +28,9 @@ def check_pdf_rate_limit(ip: str):
     pdf_rate_log[ip].append(now)
 
 
-async def read_pdf_upload(file: UploadFile) -> bytes:
+async def read_pdf_upload(file: UploadFile, user: dict = None) -> bytes:
     content = await file.read()
-    if len(content) > PDF_MAX_SIZE:
+    if not is_super_admin(user) and len(content) > PDF_MAX_SIZE:
         raise HTTPException(status_code=413, detail=f"File melebihi batas {PDF_MAX_SIZE // (1024*1024)}MB")
     if not content.startswith(b"%PDF"):
         raise HTTPException(status_code=400, detail="File bukan PDF yang valid.")
@@ -320,13 +322,13 @@ def pdf_response(writer: PdfWriter, filename: str) -> StreamingResponse:
 
 @router.post("/pdf/merge")
 async def pdf_merge(request: Request, files: List[UploadFile] = File(...), user: dict = Depends(get_current_user)):
-    check_pdf_rate_limit(request.client.host)
+    check_pdf_rate_limit(request.client.host, user)
     if len(files) < 2:
         raise HTTPException(status_code=400, detail="Pilih minimal 2 file PDF untuk digabung.")
 
     writer = PdfWriter()
     for f in files:
-        content = await read_pdf_upload(f)
+        content = await read_pdf_upload(f, user)
         reader = safe_read_pdf(content)
         for page in reader.pages:
             writer.add_page(page)
@@ -336,8 +338,8 @@ async def pdf_merge(request: Request, files: List[UploadFile] = File(...), user:
 
 @router.post("/pdf/split")
 async def pdf_split(request: Request, file: UploadFile = File(...), pages: str = Form(...), user: dict = Depends(get_current_user)):
-    check_pdf_rate_limit(request.client.host)
-    content = await read_pdf_upload(file)
+    check_pdf_rate_limit(request.client.host, user)
+    content = await read_pdf_upload(file, user)
     reader = safe_read_pdf(content)
     indices = parse_page_range(pages, len(reader.pages))
 
@@ -350,8 +352,8 @@ async def pdf_split(request: Request, file: UploadFile = File(...), pages: str =
 
 @router.post("/pdf/rotate")
 async def pdf_rotate(request: Request, file: UploadFile = File(...), angles: str = Form(...), user: dict = Depends(get_current_user)):
-    check_pdf_rate_limit(request.client.host)
-    content = await read_pdf_upload(file)
+    check_pdf_rate_limit(request.client.host, user)
+    content = await read_pdf_upload(file, user)
     reader = safe_read_pdf(content)
 
     try:
@@ -379,8 +381,8 @@ async def pdf_rotate(request: Request, file: UploadFile = File(...), angles: str
 
 @router.post("/pdf/delete-pages")
 async def pdf_delete_pages(request: Request, file: UploadFile = File(...), pages: str = Form(...), user: dict = Depends(get_current_user)):
-    check_pdf_rate_limit(request.client.host)
-    content = await read_pdf_upload(file)
+    check_pdf_rate_limit(request.client.host, user)
+    content = await read_pdf_upload(file, user)
     reader = safe_read_pdf(content)
     total = len(reader.pages)
     remove_indices = set(parse_page_range(pages, total))
@@ -398,10 +400,10 @@ async def pdf_delete_pages(request: Request, file: UploadFile = File(...), pages
 
 @router.post("/pdf/protect")
 async def pdf_protect(request: Request, file: UploadFile = File(...), password: str = Form(...), user: dict = Depends(get_current_user)):
-    check_pdf_rate_limit(request.client.host)
+    check_pdf_rate_limit(request.client.host, user)
     if len(password) < 4:
         raise HTTPException(status_code=400, detail="Password minimal 4 karakter.")
-    content = await read_pdf_upload(file)
+    content = await read_pdf_upload(file, user)
     reader = safe_read_pdf(content)
 
     writer = PdfWriter()
@@ -414,8 +416,8 @@ async def pdf_protect(request: Request, file: UploadFile = File(...), password: 
 
 @router.post("/pdf/unlock")
 async def pdf_unlock(request: Request, file: UploadFile = File(...), password: str = Form(...), user: dict = Depends(get_current_user)):
-    check_pdf_rate_limit(request.client.host)
-    content = await read_pdf_upload(file)
+    check_pdf_rate_limit(request.client.host, user)
+    content = await read_pdf_upload(file, user)
     reader = safe_read_pdf(content, password=password)
 
     writer = PdfWriter()
@@ -471,7 +473,7 @@ async def pdf_watermark(
     color: str = Form("#808080"),
     user: dict = Depends(get_current_user),
 ):
-    check_pdf_rate_limit(request.client.host)
+    check_pdf_rate_limit(request.client.host, user)
     text = text.strip()[:100]
     if not text:
         raise HTTPException(status_code=400, detail="Teks watermark tidak boleh kosong.")
@@ -481,7 +483,7 @@ async def pdf_watermark(
         raise HTTPException(status_code=400, detail="Ukuran font harus antara 8-200.")
     r, g, b = parse_hex_color(color)
 
-    content = await read_pdf_upload(file)
+    content = await read_pdf_upload(file, user)
     reader = safe_read_pdf(content)
 
     writer = PdfWriter()
@@ -517,9 +519,9 @@ CONVERT_MAX_SIZE = 30 * 1024 * 1024  # 30 MB, konversi lebih berat dari operasi 
 
 @router.post("/pdf/to-jpg")
 async def pdf_to_jpg(request: Request, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
-    check_pdf_rate_limit(request.client.host)
-    content = await read_pdf_upload(file)
-    if len(content) > CONVERT_MAX_SIZE:
+    check_pdf_rate_limit(request.client.host, user)
+    content = await read_pdf_upload(file, user)
+    if not is_super_admin(user) and len(content) > CONVERT_MAX_SIZE:
         raise HTTPException(status_code=413, detail=f"File melebihi batas {CONVERT_MAX_SIZE // (1024*1024)}MB untuk konversi.")
 
     try:
@@ -527,7 +529,7 @@ async def pdf_to_jpg(request: Request, file: UploadFile = File(...), user: dict 
     except Exception:
         raise HTTPException(status_code=400, detail="Gagal membaca PDF, file mungkin rusak.")
 
-    if doc.page_count > PDF_TO_JPG_MAX_PAGES:
+    if not is_super_admin(user) and doc.page_count > PDF_TO_JPG_MAX_PAGES:
         doc.close()
         raise HTTPException(status_code=400, detail=f"Maks {PDF_TO_JPG_MAX_PAGES} halaman untuk konversi ke JPG.")
 
@@ -549,16 +551,16 @@ async def pdf_to_jpg(request: Request, file: UploadFile = File(...), user: dict 
 
 @router.post("/image/to-pdf")
 async def image_to_pdf(request: Request, images: List[UploadFile] = File(...), user: dict = Depends(get_current_user)):
-    check_pdf_rate_limit(request.client.host)
+    check_pdf_rate_limit(request.client.host, user)
     if not images:
         raise HTTPException(status_code=400, detail="Pilih minimal 1 gambar.")
-    if len(images) > IMAGE_TO_PDF_MAX_FILES:
+    if not is_super_admin(user) and len(images) > IMAGE_TO_PDF_MAX_FILES:
         raise HTTPException(status_code=400, detail=f"Maks {IMAGE_TO_PDF_MAX_FILES} gambar sekaligus.")
 
     pil_images = []
     for img_file in images:
         content = await img_file.read()
-        if len(content) > CONVERT_MAX_SIZE:
+        if not is_super_admin(user) and len(content) > CONVERT_MAX_SIZE:
             raise HTTPException(status_code=413, detail=f"{img_file.filename} melebihi batas {CONVERT_MAX_SIZE // (1024*1024)}MB.")
         try:
             im = Image.open(io.BytesIO(content))
@@ -583,14 +585,14 @@ PDF_TO_WORD_MAX_PAGES = 50  # konversi Word jauh lebih berat per-halaman dibandi
 
 @router.post("/pdf/to-word")
 async def pdf_to_word(request: Request, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
-    check_pdf_rate_limit(request.client.host)
-    content = await read_pdf_upload(file)
-    if len(content) > CONVERT_MAX_SIZE:
+    check_pdf_rate_limit(request.client.host, user)
+    content = await read_pdf_upload(file, user)
+    if not is_super_admin(user) and len(content) > CONVERT_MAX_SIZE:
         raise HTTPException(status_code=413, detail=f"File melebihi batas {CONVERT_MAX_SIZE // (1024*1024)}MB untuk konversi.")
 
     # cek jumlah halaman dulu (murah) sebelum commit ke proses konversi yang berat
     page_count_reader = safe_read_pdf(content)
-    if len(page_count_reader.pages) > PDF_TO_WORD_MAX_PAGES:
+    if not is_super_admin(user) and len(page_count_reader.pages) > PDF_TO_WORD_MAX_PAGES:
         raise HTTPException(
             status_code=400,
             detail=f"Maks {PDF_TO_WORD_MAX_PAGES} halaman untuk konversi ke Word (server terbatas, dokumen besar butuh waktu sangat lama).",
@@ -639,9 +641,9 @@ async def pdf_compress(
     level: str = Form("medium"),
     user: dict = Depends(get_current_user),
 ):
-    check_pdf_rate_limit(request.client.host)
-    content = await read_pdf_upload(file)
-    if len(content) > CONVERT_MAX_SIZE:
+    check_pdf_rate_limit(request.client.host, user)
+    content = await read_pdf_upload(file, user)
+    if not is_super_admin(user) and len(content) > CONVERT_MAX_SIZE:
         raise HTTPException(status_code=413, detail=f"File melebihi batas {CONVERT_MAX_SIZE // (1024*1024)}MB.")
     if level not in COMPRESS_QUALITY_MAP:
         raise HTTPException(status_code=400, detail="Level kompresi tidak valid.")
@@ -652,7 +654,7 @@ async def pdf_compress(
     except Exception:
         raise HTTPException(status_code=400, detail="Gagal membaca PDF, file mungkin rusak.")
 
-    if doc.page_count > COMPRESS_MAX_PAGES:
+    if not is_super_admin(user) and doc.page_count > COMPRESS_MAX_PAGES:
         doc.close()
         raise HTTPException(status_code=400, detail=f"Maks {COMPRESS_MAX_PAGES} halaman untuk kompresi.")
 
@@ -724,11 +726,11 @@ async def pdf_edit_extract(
     password: str = Form(""),
     user: dict = Depends(get_current_user),
 ):
-    check_pdf_rate_limit(request.client.host)
-    content = await read_pdf_upload(file)
+    check_pdf_rate_limit(request.client.host, user)
+    content = await read_pdf_upload(file, user)
     doc = safe_open_pdf_mupdf(content, password or None)
 
-    if doc.page_count > EDIT_TEXT_MAX_PAGES:
+    if not is_super_admin(user) and doc.page_count > EDIT_TEXT_MAX_PAGES:
         doc.close()
         raise HTTPException(status_code=400, detail=f"Maks {EDIT_TEXT_MAX_PAGES} halaman untuk edit teks.")
 
@@ -745,7 +747,7 @@ async def pdf_edit_extract(
                 # Halaman gak punya teks asli sama sekali -- kemungkinan hasil scan/gambar.
                 # Coba OCR sebagai fallback, biar tetep bisa diedit kayak PDF teks biasa.
                 ocr_pages_used += 1
-                if ocr_pages_used > EDIT_TEXT_OCR_MAX_PAGES:
+                if not is_super_admin(user) and ocr_pages_used > EDIT_TEXT_OCR_MAX_PAGES:
                     raise HTTPException(
                         status_code=400,
                         detail=f"Terlalu banyak halaman hasil scan (maks {EDIT_TEXT_OCR_MAX_PAGES} halaman scan per file), OCR bisa lama kalau kebanyakan.",
@@ -775,8 +777,8 @@ async def pdf_edit_apply(
     edits: str = Form(...),
     user: dict = Depends(get_current_user),
 ):
-    check_pdf_rate_limit(request.client.host)
-    content = await read_pdf_upload(file)
+    check_pdf_rate_limit(request.client.host, user)
+    content = await read_pdf_upload(file, user)
     doc = safe_open_pdf_mupdf(content, password or None)
 
     try:
