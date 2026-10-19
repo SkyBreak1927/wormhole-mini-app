@@ -293,8 +293,8 @@ ADMIN_PAGE = """
         '<div class="summary"><div class="stat">Online<b style="color:#4dff88">' + nOn + '</b></div>' +
         '<div class="stat">Idle<b style="color:#ffc94d">' + nIdle + '</b></div>' +
         '<div class="stat">Total user<b>' + users.length + '</b></div></div>' +
-        '<table><tr><th>Status</th><th>Email</th><th>Role</th><th>Daftar</th><th></th></tr>' + users.map(u =>
-        '<tr><td>' + lamp(u) + '</td><td>' + esc(u.email) + '</td><td><span class="badge ' + (u.role === 'super_admin' ? 'sa' : '') + '">' + esc(u.role) + '</span>' +
+        '<table><tr><th>No</th><th>Status</th><th>Email</th><th>Role</th><th>Daftar</th><th></th></tr>' + users.map((u, i) =>
+        '<tr><td>' + (i + 1) + '</td><td>' + lamp(u) + '</td><td>' + esc(u.email) + '</td><td><span class="badge ' + (u.role === 'super_admin' ? 'sa' : '') + '">' + esc(u.role) + '</span>' +
         (u.is_banned ? ' <span class="badge ban">banned</span>' : '') + '</td><td>' + fmtDate(u.created_at) + '</td><td>' +
         (u.role === 'super_admin' ? '' :
           (u.is_banned ? '<button data-act="unban" data-id="' + esc(u.id) + '">Unban</button>'
