@@ -8,12 +8,14 @@ from starlette.background import BackgroundTask
 from pdf_tools import router as pdf_router
 from database import check_db_connection
 from auth import router as auth_router
-from auth import get_current_user
+from auth import get_current_user, is_super_admin
+from admin import router as admin_router, init_admin
 from fastapi import Depends
 
 app = FastAPI()
 app.include_router(pdf_router)
 app.include_router(auth_router)
+app.include_router(admin_router)
 
 STORAGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage")
 os.makedirs(STORAGE_DIR, exist_ok=True)
@@ -37,6 +39,7 @@ REPORT_CLEANUP_INTERVAL = 3600       # cek tiap 1 jam
 FILES = {}
 BATCHES = {}
 REPORTS = []  # list of dict: id, description, screenshot_path, screenshot_name, timestamp
+init_admin(FILES)
 upload_log = defaultdict(list)   # ip -> [timestamp upload]
 report_log = defaultdict(list)   # ip -> [timestamp laporan]
 
@@ -77,7 +80,7 @@ def is_expired(entry: dict) -> bool:
     return entry.get("expires_at") is not None and time.time() > entry["expires_at"]
 
 
-async def save_upload(file: UploadFile, expires_at: Optional[float]) -> dict:
+async def save_upload(file: UploadFile, expires_at: Optional[float], unlimited: bool = False) -> dict:
     filename = sanitize_filename(file.filename)
     token = secrets.token_urlsafe(16)
     path = os.path.join(STORAGE_DIR, token)
@@ -86,7 +89,7 @@ async def save_upload(file: UploadFile, expires_at: Optional[float]) -> dict:
     with open(path, "wb") as f:
         while chunk := await file.read(1024 * 1024):
             size += len(chunk)
-            if size > MAX_FILE_SIZE:
+            if not unlimited and size > MAX_FILE_SIZE:
                 f.close()
                 os.remove(path)
                 raise HTTPException(status_code=413, detail=f"{filename} melebihi batas {MAX_FILE_SIZE // (1024*1024)}MB")
@@ -142,22 +145,26 @@ async def db_health():
 
 @app.post("/upload")
 async def upload(request: Request, file: UploadFile = File(...), expiry_minutes: str = Form("0"), user: dict = Depends(get_current_user)):
-    check_rate_limit(request.client.host)
+    unlimited = is_super_admin(user)
+    if not unlimited:
+        check_rate_limit(request.client.host)
     expires_at = parse_expiry(expiry_minutes)
-    result = await save_upload(file, expires_at)
+    result = await save_upload(file, expires_at, unlimited)
     return {"token": result["token"]}
 
 
 @app.post("/upload-batch")
 async def upload_batch(request: Request, files: List[UploadFile] = File(...), expiry_minutes: str = Form("0"), user: dict = Depends(get_current_user)):
-    check_rate_limit(request.client.host)
+    unlimited = is_super_admin(user)
+    if not unlimited:
+        check_rate_limit(request.client.host)
 
-    if len(files) > MAX_FILES_PER_BATCH:
+    if not unlimited and len(files) > MAX_FILES_PER_BATCH:
         raise HTTPException(status_code=400, detail=f"Maks {MAX_FILES_PER_BATCH} file per batch")
 
     expires_at = parse_expiry(expiry_minutes)
     batch_token = secrets.token_urlsafe(16)
-    batch_items = [await save_upload(file, expires_at) for file in files]
+    batch_items = [await save_upload(file, expires_at, unlimited) for file in files]
     BATCHES[batch_token] = batch_items
     return {"batch_token": batch_token}
 
@@ -809,6 +816,20 @@ async def home():
         }
 
         document.getElementById('user-email-display').textContent = localStorage.getItem('user_email') || '';
+
+        // Link panel admin muncul hanya untuk super admin (keamanan tetap di backend)
+        fetch('/auth/me', {headers: {'Authorization': 'Bearer ' + getAccessToken()}})
+          .then(r => r.ok ? r.json() : null)
+          .then(me => {
+            if (me && me.role === 'super_admin') {
+              const a = document.createElement('a');
+              a.href = '/admin';
+              a.textContent = '⚙️ Admin';
+              a.style.cssText = 'color:#4da3ff;text-decoration:none;font-size:11px';
+              document.getElementById('user-bar').prepend(a);
+            }
+          })
+          .catch(() => {});
         document.getElementById('logout-btn').onclick = async () => {
           try {
             await fetch('/auth/logout', {
