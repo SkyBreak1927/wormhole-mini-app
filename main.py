@@ -82,7 +82,7 @@ def is_expired(entry: dict) -> bool:
     return entry.get("expires_at") is not None and time.time() > entry["expires_at"]
 
 
-async def save_upload(file: UploadFile, expires_at: Optional[float], unlimited: bool = False) -> dict:
+async def save_upload(file: UploadFile, expires_at: Optional[float], unlimited: bool = False, owner: Optional[str] = None) -> dict:
     filename = sanitize_filename(file.filename)
     token = secrets.token_urlsafe(16)
     path = os.path.join(STORAGE_DIR, token)
@@ -97,7 +97,7 @@ async def save_upload(file: UploadFile, expires_at: Optional[float], unlimited: 
                 raise HTTPException(status_code=413, detail=f"{filename} melebihi batas {MAX_FILE_SIZE // (1024*1024)}MB")
             f.write(chunk)
 
-    FILES[token] = {"path": path, "filename": filename, "expires_at": expires_at}
+    FILES[token] = {"path": path, "filename": filename, "expires_at": expires_at, "owner": owner}
     return {"token": token, "filename": filename}
 
 
@@ -152,7 +152,7 @@ async def upload(request: Request, file: UploadFile = File(...), expiry_minutes:
     if not unlimited:
         check_rate_limit(request.client.host)
     expires_at = parse_expiry(expiry_minutes)
-    result = await save_upload(file, expires_at, unlimited)
+    result = await save_upload(file, expires_at, unlimited, user["email"])
     return {"token": result["token"]}
 
 
@@ -168,7 +168,7 @@ async def upload_batch(request: Request, files: List[UploadFile] = File(...), ex
     expires_at = parse_expiry(expiry_minutes)
     request.state.usage_files = len(files)
     batch_token = secrets.token_urlsafe(16)
-    batch_items = [await save_upload(file, expires_at, unlimited) for file in files]
+    batch_items = [await save_upload(file, expires_at, unlimited, user["email"]) for file in files]
     BATCHES[batch_token] = batch_items
     return {"batch_token": batch_token}
 
