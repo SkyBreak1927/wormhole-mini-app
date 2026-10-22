@@ -190,6 +190,20 @@ def is_super_admin(user) -> bool:
     return bool(user) and user.get("role") == SUPER_ADMIN_ROLE
 
 
+ADMIN_ROLE = "admin"
+
+
+def is_staff(user) -> bool:
+    """admin (pengamat, hak terbatas) atau super_admin. TIDAK membebaskan dari limit/paywall."""
+    return bool(user) and user.get("role") in (ADMIN_ROLE, SUPER_ADMIN_ROLE)
+
+
+async def require_staff(user: dict = Depends(get_current_user)):
+    if not is_staff(user):
+        raise HTTPException(status_code=403, detail="Akses ditolak.")
+    return user
+
+
 async def require_super_admin(user: dict = Depends(get_current_user)):
     if not is_super_admin(user):
         raise HTTPException(status_code=403, detail="Akses ditolak.")

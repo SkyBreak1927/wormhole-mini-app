@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy import text
 from database import engine
-from auth import require_super_admin, SUPER_ADMIN_ROLE
+from auth import require_super_admin, require_staff, is_super_admin, SUPER_ADMIN_ROLE
 
 router = APIRouter()
 
@@ -50,7 +50,7 @@ ONLINE_WINDOW_SECONDS = 75  # 2 heartbeat (tiap 30 dtk) + toleransi
 
 
 @router.get("/admin/api/users")
-async def list_users(admin: dict = Depends(require_super_admin)):
+async def list_users(admin: dict = Depends(require_staff)):
     require_db()
     with engine.connect() as conn:
         rows = conn.execute(
@@ -61,6 +61,8 @@ async def list_users(admin: dict = Depends(require_super_admin)):
         ).fetchall()
     users = []
     for r in rows:
+        if r[2] == SUPER_ADMIN_ROLE and not is_super_admin(admin):
+            continue  # admin biasa tidak melihat akun super admin
         ago = float(r[6]) if r[6] is not None else None
         if r[2] == "super_admin":
             status = "hidden"  # super admin tidak dilacak
@@ -120,9 +122,11 @@ async def unban_user(user_id: str, admin: dict = Depends(require_super_admin)):
 
 
 @router.get("/admin/api/files")
-async def list_files(admin: dict = Depends(require_super_admin)):
+async def list_files(admin: dict = Depends(require_staff)):
     out = []
     for token, entry in list(_FILES.items()):
+        if entry.get("owner_super") and not is_super_admin(admin):
+            continue  # file milik super admin tidak tampil untuk admin biasa
         path = entry.get("path")
         size = os.path.getsize(path) if path and os.path.exists(path) else None
         out.append(
@@ -166,7 +170,7 @@ async def audit_log(admin: dict = Depends(require_super_admin)):
 
 
 @router.get("/admin/api/activity")
-async def activity(date: str = "", admin: dict = Depends(require_super_admin)):
+async def activity(date: str = "", admin: dict = Depends(require_staff)):
     """Ringkasan aktivitas per user untuk satu hari (zona waktu Asia/Jakarta). Default: hari ini."""
     require_db()
     day = date.strip() or None
@@ -235,7 +239,7 @@ ADMIN_PAGE = """
   a{color:#4da3ff;text-decoration:none;font-size:13px}
 </style></head><body>
   <a href="/">&larr; Kembali</a>
-  <h2>Panel Super Admin</h2>
+  <h2>Panel Admin</h2>
   <div class="sub" id="who"></div>
   <div id="msg"></div>
   <div class="tabs">
@@ -247,6 +251,7 @@ ADMIN_PAGE = """
   <div id="content"></div>
 
   <script>
+    let isSuper = false;
     const token = () => localStorage.getItem('access_token');
     if (!token()) window.location.href = '/login';
     document.getElementById('who').textContent = localStorage.getItem('user_email') || '';
@@ -297,7 +302,7 @@ ADMIN_PAGE = """
         '<table><tr><th>No</th><th>Status</th><th>Email</th><th>Role</th><th>Daftar</th><th></th></tr>' + users.map((u, i) =>
         '<tr><td>' + (i + 1) + '</td><td>' + lamp(u) + '</td><td>' + esc(u.email) + '</td><td><span class="badge ' + (u.role === 'super_admin' ? 'sa' : '') + '">' + esc(u.role) + '</span>' +
         (u.is_banned ? ' <span class="badge ban">banned</span>' : '') + '</td><td>' + fmtDate(u.created_at) + '</td><td>' +
-        (u.role === 'super_admin' ? '' :
+        (u.role === 'super_admin' || !isSuper ? '' :
           (u.is_banned ? '<button data-act="unban" data-id="' + esc(u.id) + '">Unban</button>'
                        : '<button class="danger" data-act="ban" data-id="' + esc(u.id) + '">Ban</button>')) +
         '</td></tr>').join('') + '</table>' +
@@ -318,7 +323,7 @@ ADMIN_PAGE = """
       content.innerHTML = '<table><tr><th>No</th><th>Pengirim</th><th>Nama</th><th>Ukuran</th><th>Kadaluarsa</th><th></th></tr>' + files.map((f, i) =>
         '<tr><td>' + (i + 1) + '</td><td>' + (f.owner ? esc(f.owner) : '<span style="color:#666">tidak diketahui</span>') + '</td><td>' + esc(f.filename) + '</td><td>' + fmtSize(f.size) + '</td><td>' +
         (f.expires_at ? fmtDate(f.expires_at * 1000) : 'sekali unduh') + '</td><td>' +
-        '<button class="danger" data-token="' + esc(f.token) + '">Hapus</button></td></tr>').join('') + '</table>';
+        (isSuper ? '<button class="danger" data-token="' + esc(f.token) + '">Hapus</button>' : '') + '</td></tr>').join('') + '</table>';
       content.querySelectorAll('button[data-token]').forEach(b => b.onclick = async () => {
         try { await api('/admin/api/files/' + b.dataset.token, 'DELETE'); say('File dihapus.'); showFiles(); }
         catch (e) { say(e.message, true); }
@@ -385,8 +390,17 @@ ADMIN_PAGE = """
       msg.textContent = '';
       views[name]().catch(e => { content.innerHTML = ''; say(e.message, true); });
     }
-    document.querySelectorAll('.tab').forEach(t => t.onclick = () => open(t.dataset.tab));
-    open('users');
+    (async () => {
+      try {
+        const me = await api('/auth/me');
+        if (me.role !== 'super_admin' && me.role !== 'admin') { window.location.href = '/'; return; }
+        isSuper = me.role === 'super_admin';
+        document.getElementById('who').textContent = (localStorage.getItem('user_email') || '') + ' (' + me.role + ')';
+        if (!isSuper) document.querySelector('.tab[data-tab="audit"]').remove();
+      } catch (e) { return; }
+      document.querySelectorAll('.tab').forEach(t => t.onclick = () => open(t.dataset.tab));
+      open('users');
+    })();
   </script>
 </body></html>
 """
