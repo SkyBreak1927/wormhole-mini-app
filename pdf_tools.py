@@ -12,7 +12,7 @@ from auth import get_current_user, is_super_admin
 
 router = APIRouter()
 
-PDF_MAX_SIZE = 50 * 1024 * 1024   # 50 MB per file
+PDF_MAX_SIZE = 100 * 1024 * 1024  # 100 MB per file (naik dari 50MB -- feedback customer, file merge sering lebih gede dari itu)
 PDF_RATE_LIMIT = 10
 PDF_RATE_WINDOW = 60              # detik
 pdf_rate_log = defaultdict(list)  # ip -> [timestamp]
