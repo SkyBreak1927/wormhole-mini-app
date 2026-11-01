@@ -7,7 +7,7 @@ h2{margin-bottom:var(--space-20)}
 .tool-card:hover{border-color:var(--color-accent)}
 .tool-card.active{border-color:var(--color-accent);background:var(--color-surface)}
 .tool-icon{font-size:26px;display:block;margin-bottom:var(--space-6)}
-#tool-form{width:100%;max-width:520px;margin-top:var(--space-20);display:none}
+#tool-form{scroll-margin-top:var(--space-12);width:100%;max-width:520px;margin-top:var(--space-20);display:none}
 #tool-form.open{display:block}
 #tool-form input[type=text],#tool-form input[type=number],#tool-form input[type=password]{
   width:100%;padding:var(--space-8);background:var(--color-surface);color:var(--color-text);border:1px solid var(--color-border-strong);border-radius:var(--radius-md);
@@ -84,6 +84,11 @@ input[type=color]{width:50px;height:var(--touch-min);padding:var(--space-2);marg
   gap:var(--space-8);font-size:11px;color:var(--color-text-muted);z-index:900}
 #logout-btn:hover{border-color:var(--color-danger);color:var(--color-danger)}
 #edit-password-retry{margin-top:var(--space-6)}
+
+@media (max-width:600px){
+  /* ruang scroll di bawah form supaya klik kartu bisa membawa form ke atas layar */
+  #tool-form.open{min-height:calc(100dvh - var(--space-24))}
+}
 
 @media (max-width:480px){
   .tool-grid{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}

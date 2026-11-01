@@ -1,9 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Download · wormhole-mini{% endblock %}
+{% block title %}Unduh {{ filename }} · wormhole-mini{% endblock %}
 {% block head %}<link rel="stylesheet" href="/static/css/download.css">{% endblock %}
 {% block body %}
-<h3>📦 {{ filename }}</h3>
-<a href="{{ download_url }}" class="btn btn-primary btn-lg">Download</a>
-<p class="note">File ini hanya bisa diunduh sekali.</p>
-{% if remaining_min is not none %}<p class="note-small">Kadaluarsa dalam ~{{ remaining_min }} menit</p>{% endif %}
+<main class="dl-box">
+  <h1>📦 {{ filename }}</h1>
+  <a href="{{ download_url }}" class="btn btn-primary btn-lg" data-dl data-name="{{ filename }}" download>Unduh</a>
+  <p class="note">File ini hanya bisa diunduh sekali.</p>
+  {% if remaining_text %}<p class="note-small">Kedaluwarsa dalam sekitar {{ remaining_text }}.</p>{% endif %}
+  <p class="dl-status" id="dl-status" role="status" aria-live="polite"></p>
+</main>
+<script src="/static/js/download.js"></script>
 {% endblock %}

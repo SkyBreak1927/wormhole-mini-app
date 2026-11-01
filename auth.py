@@ -1,4 +1,5 @@
-import os
+import math, os, time
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Header, Depends, Request
 from pydantic import BaseModel
@@ -12,9 +13,78 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY")
 SESSION_DURATION_DAYS = 7
 
+# --- Rate limit endpoint yang mengirim email (register, kirim ulang verifikasi, lupa password) ---
+# Disimpan di memori (reset saat deploy). Pola sama dengan check_pdf_rate_limit di pdf_tools.py.
+# Batas per email dihitung gabungan lintas endpoint, supaya satu alamat tidak bisa dibanjiri
+# lewat tiga pintu berbeda. Request yang ditolak tidak dicatat, jadi tidak memperpanjang hukuman.
+EMAIL_SEND_COOLDOWN = 60        # detik: maks 1 kali per email per 60 detik
+EMAIL_SEND_HOURLY_MAX = 5       # maks 5 kali per email per jam
+IP_SEND_HOURLY_MAX = 10         # maks 10 kali per IP per jam
+SEND_WINDOW = 3600              # detik
+RATE_LIMIT_MESSAGE = "Terlalu sering. Coba lagi dalam beberapa menit."
+SWEEP_THRESHOLD = 5000          # bersihkan kunci kedaluwarsa kalau log melebihi ini
+email_send_log = defaultdict(list)   # email (lowercase) -> [timestamp]
+ip_send_log = defaultdict(list)      # ip -> [timestamp]
+
 supabase: Client = (
     create_client(SUPABASE_URL, SUPABASE_ANON_KEY) if SUPABASE_URL and SUPABASE_ANON_KEY else None
 )
+
+
+def trust_cloudflare() -> bool:
+    """CF-Connecting-IP hanya boleh dipercaya kalau SEMUA traffic memang lewat Cloudflare.
+    Selama domain Railway (*.up.railway.app) masih bisa diakses langsung, klien bisa memalsukan
+    header itu. Set TRUST_CLOUDFLARE=1 di Railway hanya setelah domain dipindah ke Cloudflare."""
+    return os.environ.get("TRUST_CLOUDFLARE", "").strip().lower() in ("1", "true", "yes")
+
+
+def client_ip(request: Request) -> str:
+    """IP pengunjung. TRUST_CLOUDFLARE=1: CF-Connecting-IP. Selain itu header itu DIABAIKAN dan
+    dipakai entri paling kanan X-Forwarded-For (ditambahkan proxy terdekat, jadi tidak bisa
+    dipalsukan klien); terakhir alamat koneksi langsung."""
+    if trust_cloudflare():
+        cf = request.headers.get("cf-connecting-ip")
+        if cf and cf.strip():
+            return cf.strip()
+    xff = request.headers.get("x-forwarded-for")
+    if xff and xff.split(",")[-1].strip():
+        return xff.split(",")[-1].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _recent(log: dict, key: str, now: float) -> list:
+    hits = [t for t in log[key] if now - t < SEND_WINDOW]
+    if hits:
+        log[key] = hits
+    else:
+        log.pop(key, None)
+    return hits
+
+
+def check_email_send_limit(request: Request, email: str):
+    """Panggil sebelum mengirim email. Melempar 429 kalau kena batas; kalau lolos, mencatat percobaan.
+    Berlaku sama untuk email terdaftar maupun tidak, jadi tidak membocorkan status akun."""
+    now = time.time()
+    key = (email or "").strip().lower()
+    ip = client_ip(request)
+    if len(email_send_log) + len(ip_send_log) > SWEEP_THRESHOLD:
+        for log in (email_send_log, ip_send_log):
+            for k in list(log):
+                _recent(log, k, now)
+
+    ip_hits = _recent(ip_send_log, ip, now)
+    mail_hits = _recent(email_send_log, key, now)
+    if len(ip_hits) >= IP_SEND_HOURLY_MAX:
+        wait = ip_hits[0] + SEND_WINDOW - now
+    elif mail_hits and now - mail_hits[-1] < EMAIL_SEND_COOLDOWN:
+        wait = mail_hits[-1] + EMAIL_SEND_COOLDOWN - now
+    elif len(mail_hits) >= EMAIL_SEND_HOURLY_MAX:
+        wait = mail_hits[0] + SEND_WINDOW - now
+    else:
+        email_send_log[key].append(now)
+        ip_send_log[ip].append(now)
+        return
+    raise HTTPException(status_code=429, detail=RATE_LIMIT_MESSAGE, headers={"Retry-After": str(max(1, math.ceil(wait)))})
 
 
 class RegisterRequest(BaseModel):
@@ -48,10 +118,11 @@ def require_supabase():
 
 
 @router.post("/auth/register")
-async def register(body: RegisterRequest):
+async def register(body: RegisterRequest, request: Request):
     require_supabase()
     if len(body.password) < 6:
         raise HTTPException(status_code=400, detail="Password minimal 6 karakter.")
+    check_email_send_limit(request, body.email)
     try:
         result = supabase.auth.sign_up({"email": body.email, "password": body.password})
     except Exception as e:
@@ -63,10 +134,25 @@ async def register(body: RegisterRequest):
     if result.user and not result.user.identities:
         raise HTTPException(
             status_code=400,
-            detail="Email ini sudah terdaftar. Silakan login atau gunakan Lupa Password."
+            detail="Email ini sudah terdaftar. Silakan masuk atau gunakan Lupa Password."
         )
 
     return {"message": "Kode verifikasi sudah dikirim ke email kamu."}
+
+
+class ResendRequest(BaseModel):
+    email: str
+
+
+@router.post("/auth/resend-verification")
+async def resend_verification(body: ResendRequest, request: Request):
+    require_supabase()
+    check_email_send_limit(request, body.email)
+    try:
+        supabase.auth.resend({"type": "signup", "email": body.email})
+    except Exception:
+        pass  # jangan bocorkan status email (sama seperti forgot-password)
+    return {"message": "Kalau email itu menunggu verifikasi, kode baru sudah dikirim."}
 
 
 @router.post("/auth/verify")
@@ -75,8 +161,8 @@ async def verify(body: VerifyRequest):
     try:
         supabase.auth.verify_otp({"email": body.email, "token": body.code, "type": "signup"})
     except Exception:
-        raise HTTPException(status_code=400, detail="Kode salah atau sudah kadaluarsa.")
-    return {"message": "Akun berhasil diverifikasi, silakan login."}
+        raise HTTPException(status_code=400, detail="Kode salah atau sudah kedaluwarsa.")
+    return {"message": "Akun berhasil diverifikasi, silakan masuk."}
 
 
 def set_session_expiry(user_id: str):
@@ -118,7 +204,7 @@ async def refresh(body: RefreshRequest):
     try:
         result = supabase.auth.refresh_session(body.refresh_token)
     except Exception:
-        raise HTTPException(status_code=401, detail="Sesi sudah tidak valid, silakan login ulang.")
+        raise HTTPException(status_code=401, detail="Sesi sudah tidak valid, silakan masuk ulang.")
 
     set_session_expiry(result.user.id)
 
@@ -133,16 +219,16 @@ async def get_current_user(request: Request, authorization: str = Header(None)):
     """Dependency: cek token valid DAN belum lewat masa berlaku 7 hari kita sendiri."""
     require_supabase()
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Belum login.")
+        raise HTTPException(status_code=401, detail="Belum masuk.")
     token = authorization.removeprefix("Bearer ").strip()
 
     try:
         user_response = supabase.auth.get_user(token)
         user = user_response.user
     except Exception:
-        raise HTTPException(status_code=401, detail="Sesi tidak valid, silakan login ulang.")
+        raise HTTPException(status_code=401, detail="Sesi tidak valid, silakan masuk ulang.")
     if not user:
-        raise HTTPException(status_code=401, detail="Sesi tidak valid, silakan login ulang.")
+        raise HTTPException(status_code=401, detail="Sesi tidak valid, silakan masuk ulang.")
 
     if not engine:
         raise HTTPException(status_code=503, detail="Database belum dikonfigurasi di server.")
@@ -174,7 +260,7 @@ async def get_current_user(request: Request, authorization: str = Header(None)):
         expires_at = expires_at.replace(tzinfo=timezone.utc)
 
     if expires_at is None or expires_at < datetime.now(timezone.utc):
-        raise HTTPException(status_code=401, detail="Sesi sudah kadaluarsa, silakan login ulang.")
+        raise HTTPException(status_code=401, detail="Sesi sudah kedaluwarsa, silakan masuk ulang.")
 
     current = {"id": user.id, "email": user.email, "role": role}
     request.state.user = current  # dibaca UsageMiddleware
@@ -250,12 +336,13 @@ async def logout(body: LogoutRequest, authorization: str = Header(None)):
             scoped_client.auth.sign_out()
         except Exception:
             pass  # tetap anggap berhasil dari sisi user, browser tetap hapus token-nya
-    return {"message": "Berhasil logout."}
+    return {"message": "Berhasil keluar."}
 
 
 @router.post("/auth/forgot-password")
-async def forgot_password(body: ForgotPasswordRequest):
+async def forgot_password(body: ForgotPasswordRequest, request: Request):
     require_supabase()
+    check_email_send_limit(request, body.email)
     try:
         supabase.auth.reset_password_for_email(body.email)
     except Exception:
@@ -276,5 +363,5 @@ async def reset_password(body: ResetPasswordRequest):
         scoped_client.auth.verify_otp({"email": body.email, "token": body.code, "type": "recovery"})
         scoped_client.auth.update_user({"password": body.new_password})
     except Exception:
-        raise HTTPException(status_code=400, detail="Kode salah, sudah kadaluarsa, atau gagal mengubah password.")
-    return {"message": "Password berhasil diubah, silakan login dengan password baru."}
+        raise HTTPException(status_code=400, detail="Kode salah, sudah kedaluwarsa, atau gagal mengubah password.")
+    return {"message": "Password berhasil diubah, silakan masuk dengan password baru."}

@@ -2,30 +2,38 @@
 {% block title %}Daftar Akun · wormhole-mini{% endblock %}
 {% block head %}<link rel="stylesheet" href="/static/css/auth.css">{% endblock %}
 {% block body %}
-<div class="auth-box">
-  <h2>Daftar Akun</h2>
+<main class="auth-box">
+  <h1>Daftar Akun</h1>
   <p class="auth-sub">wormhole-mini</p>
 
-  <div id="step-register" class="step active">
-    <label>Email</label>
-    <input type="email" id="reg-email" placeholder="email@kamu.com">
-    <label>Password</label>
+  <form id="step-register" class="step active" novalidate>
+    <label for="reg-email">Email</label>
+    <input type="email" id="reg-email" name="email" placeholder="email@kamu.com" autocomplete="email" autocapitalize="none" spellcheck="false" inputmode="email" required>
+    <label for="reg-password">Password</label>
     <div class="pw-wrap">
-      <input type="password" id="reg-password" placeholder="Min. 6 karakter">
-      <button type="button" class="pw-toggle" data-target="reg-password" title="Lihat/sembunyikan password" aria-label="Lihat atau sembunyikan password" aria-pressed="false">👁️</button>
+      <input type="password" id="reg-password" name="password" autocomplete="new-password" aria-describedby="reg-pw-hint" required>
+      <button type="button" class="pw-toggle" data-target="reg-password" title="Lihat/sembunyikan password" aria-label="Lihat atau sembunyikan password" aria-controls="reg-password" aria-pressed="false">👁️</button>
     </div>
-    <button id="btn-register" class="btn btn-primary btn-block">Daftar</button>
-  </div>
+    <p class="hint" id="reg-pw-hint">Minimal 6 karakter.</p>
+    <button type="submit" id="btn-register" class="btn btn-primary btn-block">Daftar</button>
+  </form>
 
-  <div id="step-verify" class="step">
-    <label>Kode verifikasi (cek email kamu)</label>
-    <input type="text" id="verify-code" placeholder="Kode dari email" maxlength="12">
-    <button id="btn-verify" class="btn btn-primary btn-block">Verifikasi</button>
-  </div>
+  <form id="step-verify" class="step" novalidate>
+    <p class="step-info">Kode verifikasi dikirim ke <strong id="verify-email"></strong>.</p>
+    <p class="hint">Belum sampai? Cek folder spam atau promosi.</p>
+    <label for="verify-code">Kode verifikasi</label>
+    <input type="text" id="verify-code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="12" placeholder="Kode dari email" required>
+    <button type="submit" id="btn-verify" class="btn btn-primary btn-block">Verifikasi</button>
+    <div class="step-actions">
+      <button type="button" id="btn-resend" class="btn btn-secondary btn-block">Kirim ulang kode</button>
+      <button type="button" id="btn-change-email" class="btn-link">Salah email? Ganti email</button>
+    </div>
+  </form>
 
-  <div id="status"></div>
-  <div class="switch-link">Sudah punya akun? <a href="/login">Login di sini</a></div>
-</div>
+  <div id="status" role="status" aria-live="polite"></div>
+  <div class="switch-link">Sudah punya akun? <a href="/login">Masuk di sini</a></div>
+</main>
 
+<script src="/static/js/auth-common.js"></script>
 <script src="/static/js/register.js"></script>
 {% endblock %}
