@@ -7,7 +7,7 @@
 {% if item.available %}
 <div class="row">
   <span>{{ item.filename }}{% if item.remaining_min is not none %}<span class="row-note"> ({{ item.remaining_min }}m lagi)</span>{% endif %}</span>
-  <a href="{{ item.url }}"><button>Download</button></a>
+  <a href="{{ item.url }}" class="btn btn-primary btn-sm">Download</a>
 </div>
 {% else %}
 <div class="row done">

@@ -68,5 +68,6 @@ document.querySelectorAll('.pw-toggle').forEach(btn => {
     const input = document.getElementById(btn.dataset.target);
     input.type = input.type === 'password' ? 'text' : 'password';
     btn.style.opacity = input.type === 'password' ? '1' : '0.6';
+    btn.setAttribute('aria-pressed', input.type === 'password' ? 'false' : 'true');
   };
 });
