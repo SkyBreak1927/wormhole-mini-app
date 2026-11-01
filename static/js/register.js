@@ -1,43 +1,44 @@
 const stepRegister = document.getElementById('step-register');
 const stepVerify = document.getElementById('step-verify');
-const statusEl = document.getElementById('status');
+const resendBtn = document.getElementById('btn-resend');
 let pendingEmail = '';
 
-function setStatus(msg, isError) {
-  statusEl.textContent = msg;
-  statusEl.style.color = isError ? '#ff6b6b' : '#4dff88';
+const RESEND_LABEL = 'Kirim ulang kode';
+const RESEND_COOLDOWN = 60;
+
+function showStep(step) {
+  stepRegister.classList.toggle('active', step === 'register');
+  stepVerify.classList.toggle('active', step === 'verify');
+  document.getElementById(step === 'register' ? 'reg-email' : 'verify-code').focus();
 }
 
-document.getElementById('btn-register').onclick = async () => {
+document.getElementById('step-register').addEventListener('submit', async (e) => {
+  e.preventDefault();
   const email = document.getElementById('reg-email').value.trim();
   const password = document.getElementById('reg-password').value;
   if (!email || !password) { setStatus('Isi email dan password dulu.', true); return; }
+  if (password.length < 6) { setStatus('Password minimal 6 karakter.', true); return; }
 
   const btn = document.getElementById('btn-register');
   btn.disabled = true;
   setStatus('Memproses...', false);
 
   try {
-    const res = await fetch('/auth/register', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({email, password})
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Gagal daftar');
-
+    await postJSON('/auth/register', {email, password}, 'Gagal mendaftar. Coba lagi.');
     pendingEmail = email;
-    setStatus('Kode verifikasi sudah dikirim ke email kamu.', false);
-    stepRegister.classList.remove('active');
-    stepVerify.classList.add('active');
+    document.getElementById('verify-email').textContent = email;
+    setStatus('Kode verifikasi sudah dikirim.', false);
+    showStep('verify');
+    startCooldown(resendBtn, RESEND_COOLDOWN, RESEND_LABEL);
   } catch (err) {
     setStatus(err.message, true);
   } finally {
     btn.disabled = false;
   }
-};
+});
 
-document.getElementById('btn-verify').onclick = async () => {
+document.getElementById('step-verify').addEventListener('submit', async (e) => {
+  e.preventDefault();
   const code = document.getElementById('verify-code').value.trim();
   if (!code) { setStatus('Isi kode verifikasi dulu.', true); return; }
 
@@ -46,28 +47,32 @@ document.getElementById('btn-verify').onclick = async () => {
   setStatus('Memverifikasi...', false);
 
   try {
-    const res = await fetch('/auth/verify', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({email: pendingEmail, code})
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Kode salah');
-
-    setStatus('Berhasil! Mengalihkan ke halaman login...', false);
+    await postJSON('/auth/verify', {email: pendingEmail, code}, 'Kode salah atau sudah kedaluwarsa.');
+    setStatus('Berhasil! Mengalihkan ke halaman masuk...', false);
     setTimeout(() => { window.location.href = '/login'; }, 1500);
   } catch (err) {
     setStatus(err.message, true);
-  } finally {
     btn.disabled = false;
   }
-};
+});
 
-document.querySelectorAll('.pw-toggle').forEach(btn => {
-  btn.onclick = () => {
-    const input = document.getElementById(btn.dataset.target);
-    input.type = input.type === 'password' ? 'text' : 'password';
-    btn.style.opacity = input.type === 'password' ? '1' : '0.6';
-    btn.setAttribute('aria-pressed', input.type === 'password' ? 'false' : 'true');
-  };
+resendBtn.addEventListener('click', async () => {
+  setStatus('Mengirim ulang kode...', false);
+  startCooldown(resendBtn, RESEND_COOLDOWN, RESEND_LABEL);
+  try {
+    await postJSON('/auth/resend-verification', {email: pendingEmail}, 'Gagal mengirim ulang kode. Coba lagi.');
+    setStatus('Kode baru sudah dikirim ke ' + pendingEmail + '. Cek folder spam kalau belum sampai.', false);
+  } catch (err) {
+    clearInterval(resendBtn._cooldown);
+    resendBtn.disabled = false;
+    resendBtn.textContent = RESEND_LABEL;
+    setStatus(err.message, true);
+  }
+});
+
+document.getElementById('btn-change-email').addEventListener('click', () => {
+  clearInterval(resendBtn._cooldown);
+  document.getElementById('verify-code').value = '';
+  setStatus('', false);
+  showStep('register');
 });

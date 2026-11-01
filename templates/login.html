@@ -1,24 +1,27 @@
 {% extends "base.html" %}
-{% block title %}Login · wormhole-mini{% endblock %}
+{% block title %}Masuk · wormhole-mini{% endblock %}
 {% block head %}<link rel="stylesheet" href="/static/css/auth.css">{% endblock %}
 {% block body %}
-<div class="auth-box">
-  <h2>Login</h2>
+<main class="auth-box">
+  <h1>Masuk</h1>
   <p class="auth-sub">wormhole-mini</p>
 
-  <label>Email</label>
-  <input type="email" id="login-email" placeholder="email@kamu.com">
-  <label>Password</label>
-  <div class="pw-wrap">
-    <input type="password" id="login-password" placeholder="Password kamu">
-    <button type="button" class="pw-toggle" data-target="login-password" title="Lihat/sembunyikan password" aria-label="Lihat atau sembunyikan password" aria-pressed="false">👁️</button>
-  </div>
-  <a href="/forgot-password" class="forgot-link">Lupa password?</a>
-  <button id="btn-login" class="btn btn-primary btn-block">Login</button>
+  <form id="login-form" novalidate>
+    <label for="login-email">Email</label>
+    <input type="email" id="login-email" name="email" placeholder="email@kamu.com" autocomplete="username" autocapitalize="none" spellcheck="false" inputmode="email" required>
+    <label for="login-password">Password</label>
+    <div class="pw-wrap">
+      <input type="password" id="login-password" name="password" placeholder="Password kamu" autocomplete="current-password" required>
+      <button type="button" class="pw-toggle" data-target="login-password" title="Lihat/sembunyikan password" aria-label="Lihat atau sembunyikan password" aria-controls="login-password" aria-pressed="false">👁️</button>
+    </div>
+    <a href="/forgot-password" class="forgot-link">Lupa password?</a>
+    <button type="submit" id="btn-login" class="btn btn-primary btn-block">Masuk</button>
+  </form>
 
-  <div id="status"></div>
+  <div id="status" role="status" aria-live="polite"></div>
   <div class="switch-link">Belum punya akun? <a href="/register">Daftar di sini</a></div>
-</div>
+</main>
 
+<script src="/static/js/auth-common.js"></script>
 <script src="/static/js/login.js"></script>
 {% endblock %}

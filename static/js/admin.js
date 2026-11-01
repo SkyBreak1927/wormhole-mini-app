@@ -7,10 +7,16 @@ const content = document.getElementById('content');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 async function api(path, method) {
-  const res = await fetch(path, {method: method || 'GET', headers: {'Authorization': 'Bearer ' + token()}});
+  let res;
+  try {
+    res = await fetch(path, {method: method || 'GET', headers: {'Authorization': 'Bearer ' + token()}});
+  } catch (e) {
+    throw new Error('Koneksi terputus. Cek internetmu, lalu coba lagi.');
+  }
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) { window.location.href = '/login'; throw new Error('Sesi berakhir'); }
-  if (!res.ok) throw new Error(data.detail || ('Gagal (' + res.status + ')'));
+  if (res.status >= 500) throw new Error('Server lagi bermasalah. Coba lagi sebentar.');
+  if (!res.ok) throw new Error(typeof data.detail === 'string' && data.detail ? data.detail : 'Permintaan gagal. Coba lagi.');
   return data;
 }
 const confirmDlg = document.getElementById('confirm-dlg');
@@ -29,7 +35,7 @@ function confirmAction({title, body, okLabel, danger}) {
 }
 function say(t, err) { msg.textContent = t; msg.style.color = err ? '#ff6b6b' : '#4dff88'; }
 const fmtSize = b => b == null ? '-' : (b / 1048576).toFixed(1) + ' MB';
-const fmtDate = d => d ? new Date(d).toLocaleString() : '-';
+const fmtDate = d => d ? new Date(d).toLocaleString('id-ID', {day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false}) : '-';
 
 let usersTimer = null;
 function ago(sec) {
@@ -71,8 +77,8 @@ async function showUsers() {
   content.querySelectorAll('button[data-act]').forEach(b => b.onclick = async () => {
     const ban = b.dataset.act === 'ban';
     const yes = await confirmAction(ban
-      ? {title: 'Ban pengguna?', body: b.dataset.email + ' tidak bisa login sampai di-unban.', okLabel: 'Ban', danger: true}
-      : {title: 'Unban pengguna?', body: b.dataset.email + ' bisa login lagi.', okLabel: 'Unban', danger: false});
+      ? {title: 'Ban pengguna?', body: b.dataset.email + ' tidak bisa masuk sampai di-unban.', okLabel: 'Ban', danger: true}
+      : {title: 'Unban pengguna?', body: b.dataset.email + ' bisa masuk lagi.', okLabel: 'Unban', danger: false});
     if (!yes) return;
     try { await api('/admin/api/users/' + b.dataset.id + '/' + b.dataset.act, 'POST'); say('Berhasil.'); showUsers(); }
     catch (e) { say(e.message, true); }
@@ -86,7 +92,7 @@ async function showUsers() {
 async function showFiles() {
   const {files} = await api('/admin/api/files');
   if (!files.length) { content.innerHTML = '<p style="color:#888">Tidak ada file aktif.</p>'; return; }
-  content.innerHTML = '<table><tr><th>No</th><th>Pengirim</th><th>Nama</th><th>Ukuran</th><th>Kadaluarsa</th><th></th></tr>' + files.map((f, i) =>
+  content.innerHTML = '<table><tr><th>No</th><th>Pengirim</th><th>Nama</th><th>Ukuran</th><th>Kedaluwarsa</th><th></th></tr>' + files.map((f, i) =>
     '<tr><td>' + (i + 1) + '</td><td>' + (f.owner ? esc(f.owner) : '<span style="color:var(--color-text-muted)">tidak diketahui</span>') + '</td><td>' + esc(f.filename) + '</td><td>' + fmtSize(f.size) + '</td><td>' +
     (f.expires_at ? fmtDate(f.expires_at * 1000) : 'sekali unduh') + '</td><td>' +
     (isSuper ? '<button class="btn btn-danger btn-sm" data-token="' + esc(f.token) + '" data-name="' + esc(f.filename) + '">Hapus</button>' : '') + '</td></tr>').join('') + '</table>';
@@ -128,7 +134,7 @@ async function showActivity(dateVal) {
   const t = d.totals;
   content.innerHTML =
     '<div>Tanggal: <input type="date" id="act-date" value="' + esc(d.date) + '"> ' +
-      (d.users.length ? '<button id="act-dl" class="btn btn-secondary btn-sm" style="margin-left:8px">&#11015; Download CSV (Excel)</button>' : '') + '</div>' +
+      (d.users.length ? '<button id="act-dl" class="btn btn-secondary btn-sm" style="margin-left:8px">&#11015; Unduh CSV (Excel)</button>' : '') + '</div>' +
     '<div class="summary">' +
       '<div class="stat">User aktif<b>' + t.active_users + '</b></div>' +
       '<div class="stat">Kirim file<b>' + t.share_actions + 'x (' + t.share_files + ' file)</b></div>' +
@@ -151,6 +157,30 @@ async function showAudit() {
     : '<p style="color:#888">Belum ada aksi tercatat.</p>';
 }
 
+// Tiap sel diberi label dari judul kolomnya supaya di HP tabel bisa tampil sebagai kartu per baris.
+function labelCells() {
+  content.querySelectorAll('table').forEach(t => {
+    const heads = Array.from(t.querySelectorAll('tr:first-child th')).map(h => h.textContent);
+    t.querySelectorAll('tr').forEach((tr, r) => {
+      if (r === 0) return;
+      tr.querySelectorAll('td').forEach((td, i) => { td.dataset.label = heads[i] || ''; });
+    });
+  });
+}
+new MutationObserver(labelCells).observe(content, {childList: true});
+
+// Panah kiri/kanan memindahkan tab, seperti tablist pada umumnya.
+document.querySelector('.tabs').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  const tabs = Array.from(document.querySelectorAll('.tab'));
+  const i = tabs.indexOf(document.activeElement);
+  if (i < 0) return;
+  const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+  next.focus();
+  next.click();
+  e.preventDefault();
+});
+
 const views = {users: showUsers, activity: () => showActivity(''), files: showFiles, audit: showAudit};
 function open(name) {
   clearInterval(usersTimer);
@@ -159,7 +189,7 @@ function open(name) {
     t.setAttribute('aria-selected', String(t.dataset.tab === name));
   });
   msg.textContent = '';
-  views[name]().catch(e => { content.innerHTML = ''; say(e.message, true); });
+  views[name]().catch(e => { content.innerHTML = ''; say(e instanceof TypeError ? 'Data dari server tidak terbaca. Muat ulang halaman ini.' : e.message, true); });
 }
 (async () => {
   try {

@@ -128,17 +128,17 @@ const SIMPLE_TOOLS = {
 
 const MERGE_FIELDS_HTML =
   '<label>Tambahkan file PDF (urutan menentukan hasil merge)</label>' +
-  '<div id="merge-zone" role="button" tabindex="0" aria-label="Pilih file PDF">Klik atau drop file PDF di sini<input id="merge-file-input" type="file" accept="application/pdf" multiple style="display:none"></div>' +
+  '<div id="merge-zone" role="button" tabindex="0" aria-label="Pilih file PDF">Klik atau tarik file PDF ke sini<input id="merge-file-input" type="file" accept="application/pdf" multiple style="display:none"></div>' +
   '<div id="merge-file-list"></div>';
 
 const ROTATE_FIELDS_HTML =
   '<label>Pilih file PDF, lalu klik ikon ↻ di tiap halaman untuk memutar</label>' +
-  '<div id="rotate-zone" role="button" tabindex="0" aria-label="Pilih file PDF">Klik atau drop file PDF di sini<input id="rotate-file-input" type="file" accept="application/pdf" style="display:none"></div>' +
+  '<div id="rotate-zone" role="button" tabindex="0" aria-label="Pilih file PDF">Klik atau tarik file PDF ke sini<input id="rotate-file-input" type="file" accept="application/pdf" style="display:none"></div>' +
   '<div id="rotate-thumbs"></div>';
 
 const SPLIT_FIELDS_HTML =
   '<label>Pilih file PDF, lalu klik halaman yang mau diambil</label>' +
-  '<div id="split-zone" role="button" tabindex="0" aria-label="Pilih file PDF">Klik atau drop file PDF di sini<input id="split-file-input" type="file" accept="application/pdf" style="display:none"></div>' +
+  '<div id="split-zone" role="button" tabindex="0" aria-label="Pilih file PDF">Klik atau tarik file PDF ke sini<input id="split-file-input" type="file" accept="application/pdf" style="display:none"></div>' +
   '<div id="split-thumbs"></div>' +
   '<div id="split-actions" style="display:none">' +
     '<button type="button" id="split-select-all" class="btn btn-secondary btn-sm">Pilih Semua</button>' +
@@ -152,7 +152,7 @@ const SPLIT_FIELDS_HTML =
 
 const EDIT_TEXT_FIELDS_HTML =
   '<label>Pilih file PDF, lalu klik paragraf yang mau diedit</label>' +
-  '<div id="edit-zone" role="button" tabindex="0" aria-label="Pilih file PDF">Klik atau drop file PDF di sini<input id="edit-file-input" type="file" accept="application/pdf" style="display:none"></div>' +
+  '<div id="edit-zone" role="button" tabindex="0" aria-label="Pilih file PDF">Klik atau tarik file PDF ke sini<input id="edit-file-input" type="file" accept="application/pdf" style="display:none"></div>' +
   '<div id="edit-password-block" style="display:none">' +
     '<label>Password PDF (file ini terkunci)</label>' +
     '<div class="pw-wrap"><input type="password" id="edit-password">' + PW_TOGGLE_HTML + '</div>' +
@@ -162,7 +162,7 @@ const EDIT_TEXT_FIELDS_HTML =
   '<div id="edit-page-nav" style="display:none;margin-top:10px"></div>' +
   '<p id="edit-ocr-notice" style="display:none;font-size:11px;color:#e0b040;margin-top:8px;' +
     'padding:6px 8px;background:rgba(224,176,64,0.1);border:1px solid rgba(224,176,64,0.3);border-radius:5px">' +
-    '📄 Halaman ini hasil scan, teksnya dibaca pakai OCR — mungkin ada salah baca, cek ulang sebelum download.</p>' +
+    '📄 Halaman ini hasil scan, teksnya dibaca pakai OCR — mungkin ada salah baca, cek ulang sebelum diunduh.</p>' +
   '<div id="edit-canvas-wrap" style="display:none;margin-top:10px"></div>' +
   '<p id="edit-hint" style="font-size:11px;color:#888;margin-top:8px;display:none">' +
     'Klik teks buat edit langsung. Paragraf lain & halaman lain tidak ikut bergeser otomatis — ' +
@@ -778,6 +778,11 @@ document.querySelectorAll('.tool-card').forEach(card => {
       if (activeTool === 'watermark') setupPositionGrid();
     }
     toolForm.classList.add('open');
+    // Di HP form ada di bawah kisi kartu; geser ke sana supaya klik kartu terasa ada hasilnya.
+    if (window.matchMedia('(max-width: 600px)').matches) {
+      const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      toolForm.scrollIntoView({behavior: calm ? 'auto' : 'smooth', block: 'start'});
+    }
   };
 });
 
@@ -839,7 +844,7 @@ function submitWithProgress(url, formData, timeoutMs, isRetry) {
           }
         } else {
           logoutAndRedirect();
-          reject(new Error('Sesi berakhir, mengalihkan ke login...'));
+          reject(new Error('Sesi berakhir, mengalihkan ke halaman masuk...'));
         }
         return;
       }

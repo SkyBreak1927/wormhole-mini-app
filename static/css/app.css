@@ -53,6 +53,8 @@ input[type=file]::file-selector-button{min-height:var(--touch-min);margin-right:
 .btn-sm{padding:0 var(--space-12);font-size:12px}
 .btn-lg{padding:0 var(--space-20);font-size:15px}
 .btn-icon{min-width:var(--touch-min);padding:0}
+.btn-link{display:inline-flex;align-items:center;min-height:var(--touch-min);padding:0 var(--space-8);background:none;border:none;
+  color:var(--color-accent);font-size:13px;text-decoration:underline;cursor:pointer}
 .icon-btn{display:inline-flex;align-items:center;justify-content:center;min-width:var(--touch-min);min-height:var(--touch-min);
   padding:0;border:none;background:none;color:var(--color-text-subtle);font-size:20px;line-height:1;cursor:pointer}
 .icon-btn:hover{color:var(--color-text)}

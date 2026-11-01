@@ -88,7 +88,7 @@ fileInput.onchange = () => handleFiles(fileInput.files);
 function showResult(link) {
   document.getElementById('result').innerHTML =
     `<p>Link:</p><input type="text" value="${link}" readonly onclick="this.select()">
-     <br><button id="copybtn" class="btn btn-primary" onclick="copyLink('${link}')">Copy Link</button>
+     <br><button id="copybtn" class="btn btn-primary" onclick="copyLink('${link}')">Salin Link</button>
      <div id="qrcode" style="margin-top:14px;display:inline-block;background:#fff;padding:10px;border-radius:8px"></div>
      <p style="color:#888;font-size:12px;margin-top:6px">Scan pakai kamera HP (Android/iOS) buat buka link ini</p>`;
   new QRCode(document.getElementById('qrcode'), {
@@ -104,8 +104,8 @@ function showResult(link) {
 function copyLink(link) {
   navigator.clipboard.writeText(link);
   const btn = document.getElementById('copybtn');
-  btn.textContent = "✓ Tercopy!";
-  setTimeout(() => { btn.textContent = "Copy Link"; }, 1500);
+  btn.textContent = "✓ Tersalin!";
+  setTimeout(() => { btn.textContent = "Salin Link"; }, 1500);
 }
 
 function showProgress() {
@@ -146,7 +146,7 @@ function uploadWithProgress(url, formData, isRetry) {
           }
         } else {
           logoutAndRedirect();
-          reject(new Error("Sesi berakhir, mengalihkan ke login..."));
+          reject(new Error("Sesi berakhir, mengalihkan ke halaman masuk..."));
         }
         return;
       }
@@ -194,7 +194,7 @@ async function handleFiles(fileList) {
     document.getElementById('result').innerHTML = `<p class="error-text">${err.message}</p>`;
   } finally {
     hideProgress();
-    drop.textContent = "Drop file (bisa lebih dari 1) di sini, atau klik untuk pilih";
+    drop.textContent = "Tarik file (bisa lebih dari 1) ke sini, atau klik untuk pilih";
   }
 }
 

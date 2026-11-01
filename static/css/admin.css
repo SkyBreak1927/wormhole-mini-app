@@ -17,8 +17,16 @@ a{color:var(--color-accent);text-decoration:none;font-size:13px}
 /* Mode standar (DOCTYPE) menambah strut 16px di baris link; jadikan block agar tinggi baris sama seperti sebelumnya. */
 body>a:first-child{display:flex;align-items:center;min-height:var(--touch-min);width:max-content}
 
-@media (max-width:640px){
-  /* tabel lebar bisa digeser ke samping, kata tidak lagi dipecah per huruf */
-  table{display:block;overflow-x:auto}
-  th,td{word-break:normal;white-space:nowrap}
+/* HP: tabel jadi kartu per baris; sel aksi selalu terlihat di kanan, tanpa menggeser ke samping */
+@media (max-width:600px){
+  table,tbody{display:block}
+  tr:first-child{display:none}
+  tr{display:block;margin-bottom:var(--space-10);padding:var(--space-10) var(--space-12);background:var(--color-surface);
+     border:1px solid var(--color-border-subtle);border-radius:var(--radius-lg)}
+  td{display:flex;justify-content:space-between;align-items:center;gap:var(--space-12);padding:var(--space-4) 0;border:none;
+     text-align:right;overflow-wrap:anywhere;word-break:normal}
+  td::before{content:attr(data-label);flex:none;font-size:12px;color:var(--color-text-muted);text-align:left}
+  td:empty,td[data-label="No"]{display:none}
+  td[data-label=""]{justify-content:flex-end}
+  td[data-label=""]::before{content:none}
 }

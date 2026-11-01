@@ -81,6 +81,14 @@ def parse_expiry(expiry_minutes: str) -> Optional[float]:
     return time.time() + minutes * 60
 
 
+def fmt_remaining(minutes: int) -> str:
+    """Sisa waktu yang enak dibaca: '45 menit', '2 jam', '4 jam 57 menit'."""
+    if minutes < 60:
+        return f"{minutes} menit"
+    jam, menit = divmod(minutes, 60)
+    return f"{jam} jam" if menit == 0 else f"{jam} jam {menit} menit"
+
+
 def is_expired(entry: dict) -> bool:
     return entry.get("expires_at") is not None and time.time() > entry["expires_at"]
 
@@ -243,13 +251,14 @@ async def admin_report_screenshot(report_id: str, key: str = ""):
 async def download_page(request: Request, token: str):
     entry = FILES.get(token)
     if not entry or not os.path.exists(entry["path"]) or is_expired(entry):
-        return templates.TemplateResponse(request, "message.html", {"message": "Link sudah tidak berlaku (kadaluarsa atau sudah pernah diunduh)."}, status_code=404)
+        return templates.TemplateResponse(request, "message.html", {"title": "Link tidak berlaku", "message": "Link ini sudah tidak bisa dipakai. Mungkin filenya sudah diunduh (tiap link hanya berlaku sekali) atau sudah kedaluwarsa. Minta pengirim membagikan link baru."}, status_code=404)
 
     remaining_min = None
     if entry.get("expires_at"):
         remaining_min = max(0, int((entry["expires_at"] - time.time()) / 60))
 
     return templates.TemplateResponse(request, "download.html", {
+        "remaining_text": fmt_remaining(remaining_min) if remaining_min is not None else None,
         "filename": entry["filename"],
         "download_url": f"/d/{token}/{quote(entry['filename'])}",
         "remaining_min": remaining_min,
@@ -264,7 +273,7 @@ async def download_file(request: Request, token: str, filename_hint: str):
     entry = FILES.get(token)
     if not entry or not os.path.exists(entry["path"]) or is_expired(entry):
         FILES.pop(token, None)
-        return templates.TemplateResponse(request, "message.html", {"message": "Link sudah tidak berlaku (kadaluarsa atau sudah pernah diunduh)."}, status_code=404)
+        return templates.TemplateResponse(request, "message.html", {"title": "Link tidak berlaku", "message": "Link ini sudah tidak bisa dipakai. Mungkin filenya sudah diunduh (tiap link hanya berlaku sekali) atau sudah kedaluwarsa. Minta pengirim membagikan link baru."}, status_code=404)
     FILES.pop(token, None)
     return FileResponse(
         entry["path"],
@@ -277,7 +286,7 @@ async def download_file(request: Request, token: str, filename_hint: str):
 async def batch_page(request: Request, batch_token: str):
     items = BATCHES.get(batch_token)
     if not items:
-        return templates.TemplateResponse(request, "message.html", {"message": "Link batch tidak ditemukan atau sudah kadaluarsa."}, status_code=404)
+        return templates.TemplateResponse(request, "message.html", {"title": "Link tidak ditemukan", "message": "Link kumpulan file ini tidak ditemukan atau sudah kedaluwarsa. Minta pengirim membagikan link baru."}, status_code=404)
 
     rows = []
     for item in items:
@@ -289,7 +298,7 @@ async def batch_page(request: Request, batch_token: str):
         rows.append({
             "filename": item["filename"],
             "available": available,
-            "remaining_min": remaining_min,
+            "remaining_text": fmt_remaining(remaining_min) if remaining_min is not None else None,
             "url": f"/d/{item['token']}/{quote(item['filename'])}",
         })
     return templates.TemplateResponse(request, "batch.html", {"items": rows})

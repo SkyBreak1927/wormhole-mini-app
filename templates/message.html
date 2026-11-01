@@ -1,6 +1,11 @@
 {% extends "base.html" %}
-{% block title %}wormhole-mini{% endblock %}
+{% block title %}{{ title }} · wormhole-mini{% endblock %}
 {% block head %}<link rel="stylesheet" href="/static/css/message.css">{% endblock %}
 {% block body %}
-<h3>{{ message }}</h3>
+<main class="message-box">
+  <div class="message-icon" aria-hidden="true">🔗</div>
+  <h1>{{ title }}</h1>
+  <p>{{ message }}</p>
+  <a href="/" class="btn btn-primary">Ke beranda</a>
+</main>
 {% endblock %}

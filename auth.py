@@ -63,10 +63,24 @@ async def register(body: RegisterRequest):
     if result.user and not result.user.identities:
         raise HTTPException(
             status_code=400,
-            detail="Email ini sudah terdaftar. Silakan login atau gunakan Lupa Password."
+            detail="Email ini sudah terdaftar. Silakan masuk atau gunakan Lupa Password."
         )
 
     return {"message": "Kode verifikasi sudah dikirim ke email kamu."}
+
+
+class ResendRequest(BaseModel):
+    email: str
+
+
+@router.post("/auth/resend-verification")
+async def resend_verification(body: ResendRequest):
+    require_supabase()
+    try:
+        supabase.auth.resend({"type": "signup", "email": body.email})
+    except Exception:
+        pass  # jangan bocorkan status email (sama seperti forgot-password)
+    return {"message": "Kalau email itu menunggu verifikasi, kode baru sudah dikirim."}
 
 
 @router.post("/auth/verify")
@@ -75,8 +89,8 @@ async def verify(body: VerifyRequest):
     try:
         supabase.auth.verify_otp({"email": body.email, "token": body.code, "type": "signup"})
     except Exception:
-        raise HTTPException(status_code=400, detail="Kode salah atau sudah kadaluarsa.")
-    return {"message": "Akun berhasil diverifikasi, silakan login."}
+        raise HTTPException(status_code=400, detail="Kode salah atau sudah kedaluwarsa.")
+    return {"message": "Akun berhasil diverifikasi, silakan masuk."}
 
 
 def set_session_expiry(user_id: str):
@@ -118,7 +132,7 @@ async def refresh(body: RefreshRequest):
     try:
         result = supabase.auth.refresh_session(body.refresh_token)
     except Exception:
-        raise HTTPException(status_code=401, detail="Sesi sudah tidak valid, silakan login ulang.")
+        raise HTTPException(status_code=401, detail="Sesi sudah tidak valid, silakan masuk ulang.")
 
     set_session_expiry(result.user.id)
 
@@ -133,16 +147,16 @@ async def get_current_user(request: Request, authorization: str = Header(None)):
     """Dependency: cek token valid DAN belum lewat masa berlaku 7 hari kita sendiri."""
     require_supabase()
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Belum login.")
+        raise HTTPException(status_code=401, detail="Belum masuk.")
     token = authorization.removeprefix("Bearer ").strip()
 
     try:
         user_response = supabase.auth.get_user(token)
         user = user_response.user
     except Exception:
-        raise HTTPException(status_code=401, detail="Sesi tidak valid, silakan login ulang.")
+        raise HTTPException(status_code=401, detail="Sesi tidak valid, silakan masuk ulang.")
     if not user:
-        raise HTTPException(status_code=401, detail="Sesi tidak valid, silakan login ulang.")
+        raise HTTPException(status_code=401, detail="Sesi tidak valid, silakan masuk ulang.")
 
     if not engine:
         raise HTTPException(status_code=503, detail="Database belum dikonfigurasi di server.")
@@ -174,7 +188,7 @@ async def get_current_user(request: Request, authorization: str = Header(None)):
         expires_at = expires_at.replace(tzinfo=timezone.utc)
 
     if expires_at is None or expires_at < datetime.now(timezone.utc):
-        raise HTTPException(status_code=401, detail="Sesi sudah kadaluarsa, silakan login ulang.")
+        raise HTTPException(status_code=401, detail="Sesi sudah kedaluwarsa, silakan masuk ulang.")
 
     current = {"id": user.id, "email": user.email, "role": role}
     request.state.user = current  # dibaca UsageMiddleware
@@ -250,7 +264,7 @@ async def logout(body: LogoutRequest, authorization: str = Header(None)):
             scoped_client.auth.sign_out()
         except Exception:
             pass  # tetap anggap berhasil dari sisi user, browser tetap hapus token-nya
-    return {"message": "Berhasil logout."}
+    return {"message": "Berhasil keluar."}
 
 
 @router.post("/auth/forgot-password")
@@ -276,5 +290,5 @@ async def reset_password(body: ResetPasswordRequest):
         scoped_client.auth.verify_otp({"email": body.email, "token": body.code, "type": "recovery"})
         scoped_client.auth.update_user({"password": body.new_password})
     except Exception:
-        raise HTTPException(status_code=400, detail="Kode salah, sudah kadaluarsa, atau gagal mengubah password.")
-    return {"message": "Password berhasil diubah, silakan login dengan password baru."}
+        raise HTTPException(status_code=400, detail="Kode salah, sudah kedaluwarsa, atau gagal mengubah password.")
+    return {"message": "Password berhasil diubah, silakan masuk dengan password baru."}

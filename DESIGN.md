@@ -251,3 +251,12 @@ Kotak putus-putus `2px #555`, teks tengah `#999`; saat drag border dan teks jadi
 ### Don't (ditambahkan setelah polish batch 1):
 - **Don't** menulis `height:100vh` atau lebar piksel tetap (mis. `width:360px`) untuk wadah konten.
 - **Don't** memakai `<div>`/`<span>` sebagai tombol tanpa `role`, `tabindex`, dan label.
+
+### Do (ditambahkan setelah polish batch 2):
+- **Do** bungkus input auth dengan `<form>`, hubungkan `<label for>`, dan isi `autocomplete` yang tepat (`username`, `current-password`, `new-password`, `one-time-code`).
+- **Do** tampilkan aturan input sebagai teks bantu tetap di bawah field, bukan placeholder.
+- **Do** tulis pesan error dalam Bahasa Indonesia yang bisa dipahami, di elemen `role="status"` + `aria-live="polite"`; jangan tampilkan pesan teknis mentah.
+- **Do** pakai istilah seragam: "Masuk", "Daftar", "Keluar", "Unduh", "kedaluwarsa".
+
+### Don't (ditambahkan setelah polish batch 2):
+- **Don't** menaruh `<button>` di dalam `<a>`; pakai `<a class="btn …">` untuk tautan yang berperan sebagai tombol.

@@ -1,2 +1,6 @@
-/* Quirks mode dulu mengabaikan margin atas elemen pertama di body; pertahankan tampilan itu. */
-h3{margin-top:0}
+body{background:var(--color-bg);color:var(--color-text);font-family:sans-serif;display:flex;align-items:center;justify-content:center;
+     min-height:100dvh;margin:0;padding:var(--space-20)}
+.message-box{width:100%;max-width:360px;text-align:center}
+.message-icon{font-size:36px;margin-bottom:var(--space-8)}
+.message-box h1{margin:0 0 var(--space-8);font-size:1.25rem}
+.message-box p{margin:0 0 var(--space-20);font-size:14px;line-height:1.5;color:var(--color-text-soft)}
