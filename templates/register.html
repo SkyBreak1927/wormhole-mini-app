@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Daftar Akun · wormhole-mini{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/auth.css">{% endblock %}
+{% block body %}
+<div class="auth-box">
+  <h2>Daftar Akun</h2>
+  <p class="auth-sub">wormhole-mini</p>
+
+  <div id="step-register" class="step active">
+    <label>Email</label>
+    <input type="email" id="reg-email" placeholder="email@kamu.com">
+    <label>Password</label>
+    <div class="pw-wrap">
+      <input type="password" id="reg-password" placeholder="Min. 6 karakter">
+      <button type="button" class="pw-toggle" data-target="reg-password" title="Lihat/sembunyikan password">👁️</button>
+    </div>
+    <button id="btn-register">Daftar</button>
+  </div>
+
+  <div id="step-verify" class="step">
+    <label>Kode verifikasi (cek email kamu)</label>
+    <input type="text" id="verify-code" placeholder="Kode dari email" maxlength="12">
+    <button id="btn-verify">Verifikasi</button>
+  </div>
+
+  <div id="status"></div>
+  <div class="switch-link">Sudah punya akun? <a href="/login">Login di sini</a></div>
+</div>
+
+<script src="/static/js/register.js"></script>
+{% endblock %}

@@ -1,0 +1,20 @@
+body{background:var(--color-bg);color:var(--color-text);font-family:sans-serif;margin:0;padding:var(--space-24) var(--space-16);max-width:860px;margin:0 auto}
+h2{margin:0 0 var(--space-4)} .sub{color:var(--color-text-muted);font-size:13px;margin-bottom:var(--space-18)}
+.tabs{display:flex;gap:var(--space-8);margin-bottom:var(--space-16)}
+.tab{padding:var(--space-8) var(--space-14);background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md);cursor:pointer;font-size:13px}
+.tab.active{border-color:var(--color-accent);color:var(--color-accent)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:var(--space-8) var(--space-6);border-bottom:1px solid var(--color-border-subtle);word-break:break-all}
+th{color:var(--color-text-muted);font-weight:normal}
+button{padding:5px var(--space-10);border:none;border-radius:var(--radius-md);background:var(--color-accent);color:var(--color-white);cursor:pointer;font-size:12px}
+button.danger{background:var(--color-danger)}
+.badge{font-size:11px;padding:var(--space-2) var(--space-6);border-radius:var(--radius-xs);background:var(--color-border-subtle)}
+.badge.sa{background:var(--color-accent);color:var(--color-white)} .badge.ban{background:var(--color-danger);color:var(--color-white)}
+#msg{font-size:13px;min-height:18px;margin-bottom:var(--space-10)}
+.summary{display:flex;gap:var(--space-10);flex-wrap:wrap;margin:var(--space-12) 0}
+.stat{background:var(--color-surface);border:1px solid var(--color-border-subtle);border-radius:var(--radius-lg);padding:var(--space-10) var(--space-14);font-size:12px;color:var(--color-text-muted)}
+.stat b{display:block;color:var(--color-text);font-size:18px;margin-top:var(--space-2)}
+input[type=date]{background:var(--color-surface);color:var(--color-text);border:1px solid var(--color-border-strong);border-radius:var(--radius-md);padding:var(--space-6) var(--space-8)}
+a{color:var(--color-accent);text-decoration:none;font-size:13px}
+/* Mode standar (DOCTYPE) menambah strut 16px di baris link; jadikan block agar tinggi baris sama seperti sebelumnya. */
+body>a:first-child{display:block;width:max-content}

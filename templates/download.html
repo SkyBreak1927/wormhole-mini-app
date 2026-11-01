@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Download · wormhole-mini{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/download.css">{% endblock %}
+{% block body %}
+<h3>📦 {{ filename }}</h3>
+<a href="{{ download_url }}">
+  <button class="btn-download">Download</button>
+</a>
+<p class="note">File ini hanya bisa diunduh sekali.</p>
+{% if remaining_min is not none %}<p class="note-small">Kadaluarsa dalam ~{{ remaining_min }} menit</p>{% endif %}
+{% endblock %}

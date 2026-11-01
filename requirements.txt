@@ -10,3 +10,4 @@ sqlalchemy
 psycopg2-binary
 psycopg[binary]
 supabase
+jinja2
