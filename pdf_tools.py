@@ -1,4 +1,5 @@
-import io, time, json, zipfile, tempfile, os, asyncio
+import io, time, json, zipfile, tempfile, os, asyncio, logging
+from contextvars import ContextVar
 from collections import defaultdict
 from typing import List
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Depends
@@ -11,6 +12,12 @@ from pdf2docx import Converter
 from auth import get_current_user, is_super_admin
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+# True kalau request ini harus memakai repair PyMuPDF (file terpotong). Dibaca pdf_response
+# untuk kirim penanda X-PDF-Repaired ke frontend. Tiap request punya context sendiri.
+pdf_repaired: ContextVar[bool] = ContextVar("pdf_repaired", default=False)
+REPAIRED_HEADER = "X-PDF-Repaired"
 
 PDF_MAX_SIZE = 100 * 1024 * 1024  # 100 MB per file (naik dari 50MB -- feedback customer, file merge sering lebih gede dari itu)
 PDF_RATE_LIMIT = 10
@@ -28,6 +35,8 @@ def check_pdf_rate_limit(ip: str, user: dict = None):
     pdf_rate_log[ip].append(now)
 
 
+# TODO: upload dibaca penuh ke RAM lewat file.read() (risiko OOM untuk file besar), dan super
+# admin tanpa batas ukuran sama sekali. Pertimbangkan baca bertahap dengan batas keras.
 async def read_pdf_upload(file: UploadFile, user: dict = None) -> bytes:
     content = await file.read()
     if not is_super_admin(user) and len(content) > PDF_MAX_SIZE:
@@ -37,19 +46,39 @@ async def read_pdf_upload(file: UploadFile, user: dict = None) -> bytes:
     return content
 
 
+def _reader_from_bytes(content: bytes, password: str = None) -> PdfReader:
+    reader = PdfReader(io.BytesIO(content))
+    if reader.is_encrypted:
+        if not password:
+            raise HTTPException(status_code=400, detail="PDF ini terkunci password, isi password dulu.")
+        if not reader.decrypt(password):
+            raise HTTPException(status_code=400, detail="Password salah.")
+    return reader
+
+
 def safe_read_pdf(content: bytes, password: str = None) -> PdfReader:
     try:
-        reader = PdfReader(io.BytesIO(content))
-        if reader.is_encrypted:
-            if not password:
-                raise HTTPException(status_code=400, detail="PDF ini terkunci password, isi password dulu.")
-            if not reader.decrypt(password):
-                raise HTTPException(status_code=400, detail="Password salah.")
-        return reader
+        return _reader_from_bytes(content, password)
     except HTTPException:
         raise
-    except Exception:
+    except Exception as e:
+        logger.warning("pypdf gagal membaca PDF (%s: %s), mencoba repair via PyMuPDF", type(e).__name__, e)
+
+    try:
+        doc = pymupdf.open(stream=content, filetype="pdf")
+        try:
+            repaired = doc.tobytes()
+        finally:
+            doc.close()
+        reader = _reader_from_bytes(repaired, password)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("Repair via PyMuPDF gagal (%s: %s)", type(e).__name__, e)
         raise HTTPException(status_code=400, detail="Gagal membaca PDF, file mungkin rusak.")
+
+    pdf_repaired.set(True)
+    return reader
 
 
 def safe_open_pdf_mupdf(content: bytes, password: str = None):
@@ -313,11 +342,10 @@ def pdf_response(writer: PdfWriter, filename: str) -> StreamingResponse:
     output = io.BytesIO()
     writer.write(output)
     output.seek(0)
-    return StreamingResponse(
-        output,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    if pdf_repaired.get():
+        headers[REPAIRED_HEADER] = "1"
+    return StreamingResponse(output, media_type="application/pdf", headers=headers)
 
 
 @router.post("/pdf/merge")
@@ -1850,6 +1878,7 @@ async def pdf_tools_page():
                   blob: xhr.response,
                   originalSize: xhr.getResponseHeader('X-Original-Size'),
                   compressedSize: xhr.getResponseHeader('X-Compressed-Size'),
+                  repaired: xhr.getResponseHeader('X-PDF-Repaired') === '1',
                 });
               } else {
                 const reader = new FileReader();
@@ -1986,6 +2015,10 @@ async def pdf_tools_page():
               toolStatus.textContent = '✓ Selesai, file terunduh.';
             }
             toolStatus.style.color = '#4dff88';
+            if (result.repaired) {
+              toolStatus.textContent += ' Salah satu file tampak terpotong dan sudah diperbaiki otomatis. Periksa hasilnya.';
+              toolStatus.style.color = '#e0b040';
+            }
             setTimeout(() => { progressContainer.style.display = 'none'; }, 800);
           } catch (err) {
             toolStatus.textContent = err.message;
