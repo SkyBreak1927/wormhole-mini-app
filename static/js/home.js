@@ -57,7 +57,7 @@ fetch('/auth/me', {headers: {'Authorization': 'Bearer ' + getAccessToken()}})
       const a = document.createElement('a');
       a.href = '/admin';
       a.textContent = '⚙️ Admin';
-      a.style.cssText = 'color:#4da3ff;text-decoration:none;font-size:11px';
+      a.className = 'user-bar-link';
       document.getElementById('user-bar').prepend(a);
     }
   })
@@ -88,7 +88,7 @@ fileInput.onchange = () => handleFiles(fileInput.files);
 function showResult(link) {
   document.getElementById('result').innerHTML =
     `<p>Link:</p><input type="text" value="${link}" readonly onclick="this.select()">
-     <br><button id="copybtn" onclick="copyLink('${link}')">Copy Link</button>
+     <br><button id="copybtn" class="btn btn-primary" onclick="copyLink('${link}')">Copy Link</button>
      <div id="qrcode" style="margin-top:14px;display:inline-block;background:#fff;padding:10px;border-radius:8px"></div>
      <p style="color:#888;font-size:12px;margin-top:6px">Scan pakai kamera HP (Android/iOS) buat buka link ini</p>`;
   new QRCode(document.getElementById('qrcode'), {
@@ -207,7 +207,7 @@ helpBtn.onclick = () => helpPanel.classList.toggle('open');
 helpClose.onclick = () => helpPanel.classList.remove('open');
 
 document.querySelectorAll('.faq-q').forEach(q => {
-  q.onclick = () => q.parentElement.classList.toggle('open');
+  q.onclick = () => q.setAttribute('aria-expanded', String(q.parentElement.classList.toggle('open')));
 });
 
 // --- Bug report widget ---

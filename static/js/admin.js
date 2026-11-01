@@ -13,6 +13,20 @@ async function api(path, method) {
   if (!res.ok) throw new Error(data.detail || ('Gagal (' + res.status + ')'));
   return data;
 }
+const confirmDlg = document.getElementById('confirm-dlg');
+// Dialog konfirmasi: resolve true hanya kalau pengguna menekan tombol OK (Esc/Batal = false).
+function confirmAction({title, body, okLabel, danger}) {
+  return new Promise(resolve => {
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-body').textContent = body;
+    const ok = document.getElementById('confirm-ok');
+    ok.textContent = okLabel;
+    ok.className = 'btn ' + (danger ? 'btn-danger' : 'btn-primary');
+    confirmDlg.returnValue = '';
+    confirmDlg.addEventListener('close', () => resolve(confirmDlg.returnValue === 'ok'), {once: true});
+    confirmDlg.showModal();
+  });
+}
 function say(t, err) { msg.textContent = t; msg.style.color = err ? '#ff6b6b' : '#4dff88'; }
 const fmtSize = b => b == null ? '-' : (b / 1048576).toFixed(1) + ' MB';
 const fmtDate = d => d ? new Date(d).toLocaleString() : '-';
@@ -31,10 +45,10 @@ const LAMP = {
 };
 function lamp(u) {
   const [c, label] = LAMP[u.status];
-  if (u.status === 'hidden') return '<span style="color:#666">-</span>';
+  if (u.status === 'hidden') return '<span style="color:var(--color-text-muted)">-</span>';
   const glow = u.status === 'offline' ? '' : 'box-shadow:0 0 6px ' + c + ';';
   return '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;background:' + c + ';' + glow + '"></span>' +
-    label + (u.status === 'offline' ? ' <span style="color:#666">(' + ago(u.last_seen_ago) + ')</span>' : '');
+    label + (u.status === 'offline' ? ' <span style="color:var(--color-text-muted)">(' + ago(u.last_seen_ago) + ')</span>' : '');
 }
 
 async function showUsers() {
@@ -50,11 +64,16 @@ async function showUsers() {
     '<tr><td>' + (i + 1) + '</td><td>' + lamp(u) + '</td><td>' + esc(u.email) + '</td><td><span class="badge ' + (u.role === 'super_admin' ? 'sa' : '') + '">' + esc(u.role) + '</span>' +
     (u.is_banned ? ' <span class="badge ban">banned</span>' : '') + '</td><td>' + fmtDate(u.created_at) + '</td><td>' +
     (u.role === 'super_admin' || !isSuper ? '' :
-      (u.is_banned ? '<button data-act="unban" data-id="' + esc(u.id) + '">Unban</button>'
-                   : '<button class="danger" data-act="ban" data-id="' + esc(u.id) + '">Ban</button>')) +
+      (u.is_banned ? '<button class="btn btn-primary btn-sm" data-act="unban" data-id="' + esc(u.id) + '" data-email="' + esc(u.email) + '">Unban</button>'
+                   : '<button class="btn btn-danger btn-sm" data-act="ban" data-id="' + esc(u.id) + '" data-email="' + esc(u.email) + '">Ban</button>')) +
     '</td></tr>').join('') + '</table>' +
-    '<p style="color:#666;font-size:12px">Status diperbarui otomatis tiap 30 detik. Offline terdeteksi sekitar 75 detik setelah tab ditutup.</p>';
+    '<p style="color:var(--color-text-muted);font-size:12px">Status diperbarui otomatis tiap 30 detik. Offline terdeteksi sekitar 75 detik setelah tab ditutup.</p>';
   content.querySelectorAll('button[data-act]').forEach(b => b.onclick = async () => {
+    const ban = b.dataset.act === 'ban';
+    const yes = await confirmAction(ban
+      ? {title: 'Ban pengguna?', body: b.dataset.email + ' tidak bisa login sampai di-unban.', okLabel: 'Ban', danger: true}
+      : {title: 'Unban pengguna?', body: b.dataset.email + ' bisa login lagi.', okLabel: 'Unban', danger: false});
+    if (!yes) return;
     try { await api('/admin/api/users/' + b.dataset.id + '/' + b.dataset.act, 'POST'); say('Berhasil.'); showUsers(); }
     catch (e) { say(e.message, true); }
   });
@@ -68,10 +87,12 @@ async function showFiles() {
   const {files} = await api('/admin/api/files');
   if (!files.length) { content.innerHTML = '<p style="color:#888">Tidak ada file aktif.</p>'; return; }
   content.innerHTML = '<table><tr><th>No</th><th>Pengirim</th><th>Nama</th><th>Ukuran</th><th>Kadaluarsa</th><th></th></tr>' + files.map((f, i) =>
-    '<tr><td>' + (i + 1) + '</td><td>' + (f.owner ? esc(f.owner) : '<span style="color:#666">tidak diketahui</span>') + '</td><td>' + esc(f.filename) + '</td><td>' + fmtSize(f.size) + '</td><td>' +
+    '<tr><td>' + (i + 1) + '</td><td>' + (f.owner ? esc(f.owner) : '<span style="color:var(--color-text-muted)">tidak diketahui</span>') + '</td><td>' + esc(f.filename) + '</td><td>' + fmtSize(f.size) + '</td><td>' +
     (f.expires_at ? fmtDate(f.expires_at * 1000) : 'sekali unduh') + '</td><td>' +
-    (isSuper ? '<button class="danger" data-token="' + esc(f.token) + '">Hapus</button>' : '') + '</td></tr>').join('') + '</table>';
+    (isSuper ? '<button class="btn btn-danger btn-sm" data-token="' + esc(f.token) + '" data-name="' + esc(f.filename) + '">Hapus</button>' : '') + '</td></tr>').join('') + '</table>';
   content.querySelectorAll('button[data-token]').forEach(b => b.onclick = async () => {
+    const yes = await confirmAction({title: 'Hapus file?', body: '"' + b.dataset.name + '" langsung hilang dan linknya mati. Tidak bisa dibatalkan.', okLabel: 'Hapus', danger: true});
+    if (!yes) return;
     try { await api('/admin/api/files/' + b.dataset.token, 'DELETE'); say('File dihapus.'); showFiles(); }
     catch (e) { say(e.message, true); }
   });
@@ -107,7 +128,7 @@ async function showActivity(dateVal) {
   const t = d.totals;
   content.innerHTML =
     '<div>Tanggal: <input type="date" id="act-date" value="' + esc(d.date) + '"> ' +
-      (d.users.length ? '<button id="act-dl" style="margin-left:8px">&#11015; Download CSV (Excel)</button>' : '') + '</div>' +
+      (d.users.length ? '<button id="act-dl" class="btn btn-secondary btn-sm" style="margin-left:8px">&#11015; Download CSV (Excel)</button>' : '') + '</div>' +
     '<div class="summary">' +
       '<div class="stat">User aktif<b>' + t.active_users + '</b></div>' +
       '<div class="stat">Kirim file<b>' + t.share_actions + 'x (' + t.share_files + ' file)</b></div>' +
@@ -133,7 +154,10 @@ async function showAudit() {
 const views = {users: showUsers, activity: () => showActivity(''), files: showFiles, audit: showAudit};
 function open(name) {
   clearInterval(usersTimer);
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.tab === name);
+    t.setAttribute('aria-selected', String(t.dataset.tab === name));
+  });
   msg.textContent = '';
   views[name]().catch(e => { content.innerHTML = ''; say(e.message, true); });
 }

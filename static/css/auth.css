@@ -1,22 +1,20 @@
 body{background:var(--color-bg);color:var(--color-text);font-family:sans-serif;display:flex;flex-direction:column;
-     align-items:center;justify-content:center;height:100vh;margin:0;padding:var(--space-20);box-sizing:border-box}
+     align-items:center;justify-content:center;min-height:100dvh;margin:0;padding:var(--space-20)}
 .auth-box{width:100%;max-width:340px}
 h2{margin-bottom:var(--space-6);text-align:center}
 .auth-sub{color:var(--color-text-muted);font-size:13px;text-align:center;margin-bottom:var(--space-20)}
 label{font-size:12px;color:var(--color-text-subtle);display:block;margin-top:var(--space-12);margin-bottom:var(--space-4)}
 input{width:100%;padding:var(--space-10);background:var(--color-surface);color:var(--color-text);border:1px solid var(--color-border-strong);
   border-radius:var(--radius-md);box-sizing:border-box;font-size:14px}
-button{width:100%;margin-top:var(--space-18);padding:var(--space-10);border:none;border-radius:var(--radius-md);
-  background:var(--color-accent);color:var(--color-white);cursor:pointer;font-size:14px}
-button:disabled{opacity:0.5;cursor:not-allowed}
+#btn-login,#btn-register,#btn-verify,#btn-request,#btn-reset{margin-top:var(--space-18)}
 #status{margin-top:var(--space-12);font-size:13px;text-align:center;min-height:18px}
 .switch-link{margin-top:var(--space-16);text-align:center;font-size:13px;color:var(--color-text-muted)}
-.switch-link a{color:var(--color-accent);text-decoration:none}
+.switch-link a{display:inline-flex;align-items:center;min-height:var(--touch-min);padding:0 var(--space-4);color:var(--color-accent);text-decoration:none}
 .step{display:none}
 .step.active{display:block}
 .pw-wrap{position:relative}
-.pw-wrap input{padding-right:var(--space-36)}
-.pw-toggle{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;
-  border:none;cursor:pointer;font-size:15px;padding:var(--space-4);margin:0;width:auto;line-height:1}
-.forgot-link{display:block;text-align:right;font-size:12px;color:var(--color-accent);
-  text-decoration:none;margin-top:var(--space-6)}
+.pw-wrap input{padding-right:var(--touch-min)}
+.pw-toggle{color:var(--color-text);position:absolute;right:0;top:50%;transform:translateY(-50%);display:flex;align-items:center;justify-content:center;
+  width:var(--touch-min);height:var(--touch-min);background:none;border:none;cursor:pointer;font-size:15px;padding:0;margin:0;line-height:1}
+.forgot-link{display:flex;justify-content:flex-end;align-items:center;min-height:var(--touch-min);font-size:12px;color:var(--color-accent);
+  text-decoration:none}

@@ -1,0 +1,267 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-01T15:16:11.452855+00:00",
+  "title": "Design System: wormhole-mini",
+  "extensions": {
+    "colorMeta": {
+      "accent-blue": {
+        "role": "primary",
+        "displayName": "Bright Signal Blue",
+        "canonical": "#4da3ff",
+        "tonalRamp": [
+          "#0f253d",
+          "#003e80",
+          "#0056b2",
+          "#006fe6",
+          "#1a88ff",
+          "#5cabff",
+          "#a3d0ff",
+          "#ebf2fa"
+        ]
+      },
+      "danger-coral": {
+        "role": "secondary",
+        "displayName": "Alert Coral",
+        "canonical": "#ff6b6b",
+        "tonalRamp": [
+          "#3d0f0f",
+          "#800000",
+          "#b20000",
+          "#e60000",
+          "#ff1a1a",
+          "#ff5c5c",
+          "#ffa3a3",
+          "#faebeb"
+        ]
+      },
+      "night-bg": {
+        "role": "neutral",
+        "displayName": "Night Ground",
+        "canonical": "#0f0f10",
+        "tonalRamp": [
+          "#262627",
+          "#3e3e42",
+          "#56565c",
+          "#6f6f76",
+          "#898990",
+          "#ababb0",
+          "#d0d0d3",
+          "#f2f2f2"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Panel Slate",
+        "canonical": "#1a1a1c",
+        "tonalRamp": [
+          "#252527",
+          "#3d3d42",
+          "#56565d",
+          "#6e6e77",
+          "#888890",
+          "#aaaab0",
+          "#cfcfd3",
+          "#f2f2f3"
+        ]
+      },
+      "text-primary": {
+        "role": "neutral",
+        "displayName": "Paper Grey",
+        "canonical": "#eeeeee",
+        "tonalRamp": [
+          "#262626",
+          "#404040",
+          "#595959",
+          "#737373",
+          "#8c8c8c",
+          "#adadad",
+          "#d1d1d1",
+          "#f2f2f2"
+        ]
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "Edge",
+        "canonical": "#444444",
+        "tonalRamp": [
+          "#262626",
+          "#404040",
+          "#595959",
+          "#737373",
+          "#8c8c8c",
+          "#adadad",
+          "#d1d1d1",
+          "#f2f2f2"
+        ]
+      },
+      "accent-blue-solid": {
+        "role": "primary",
+        "displayName": "Solid Action Blue",
+        "canonical": "#1f6fd6",
+        "tonalRamp": [
+          "#0b2a52",
+          "#103f7a",
+          "#155aa8",
+          "#1f6fd6",
+          "#4a8de0",
+          "#7aaeea",
+          "#b0cff3",
+          "#e3eefb"
+        ]
+      },
+      "danger-coral-solid": {
+        "role": "secondary",
+        "displayName": "Solid Danger Red",
+        "canonical": "#c93434",
+        "tonalRamp": [
+          "#3d0f0f",
+          "#661a1a",
+          "#8f2525",
+          "#c93434",
+          "#d85f5f",
+          "#e48d8d",
+          "#efbdbd",
+          "#fae6e6"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Judul halaman (h2 bawaan)."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Input, tombol, isi utama."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Label field, status, catatan."
+      }
+    },
+    "shadows": [
+      {
+        "name": "floating-action",
+        "value": "0 2px 8px rgba(0,0,0,0.4)",
+        "purpose": "Tombol bantuan dan laporan bug yang mengambang."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-fast",
+        "value": "0.15s",
+        "purpose": "Transisi border kartu/dropzone, bar progres linear 0.15s."
+      }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Aksi utama, melebar penuh di form.",
+      "html": "<button class=\"ds-btn-primary\">Daftar</button>",
+      "css": ".ds-btn-primary{display:inline-flex;align-items:center;justify-content:center;min-height:44px;background:#1f6fd6;color:#fff;border:1px solid transparent;border-radius:6px;padding:0 16px;font-size:14px;cursor:pointer}.ds-btn-primary:hover{background:#1b66c9}.ds-btn-primary:focus-visible{outline:2px solid #4da3ff;outline-offset:2px}.ds-btn-primary:disabled{opacity:.5;cursor:not-allowed}"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Hapus atau kirim laporan bug.",
+      "html": "<button class=\"ds-btn-danger\">Hapus</button>",
+      "css": ".ds-btn-danger{display:inline-flex;align-items:center;justify-content:center;min-height:44px;background:#c93434;color:#fff;border:1px solid transparent;border-radius:6px;padding:0 16px;font-size:13px;cursor:pointer}.ds-btn-danger:hover{background:#bf3030}.ds-btn-danger:focus-visible{outline:2px solid #4da3ff;outline-offset:2px}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Aksi kecil di daftar dan toolbar.",
+      "html": "<button class=\"ds-btn-secondary\">Pilih semua</button>",
+      "css": ".ds-btn-secondary{display:inline-flex;align-items:center;justify-content:center;min-height:44px;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:0 16px;font-size:12px;cursor:pointer}.ds-btn-secondary:hover{border-color:#4da3ff}.ds-btn-secondary:focus-visible{outline:2px solid #4da3ff;outline-offset:2px}"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Field teks gelap dengan label di atas.",
+      "html": "<label class=\"ds-label\">Email</label><input class=\"ds-input\" placeholder=\"email@kamu.com\">",
+      "css": ".ds-label{display:block;font-size:12px;color:#999;margin-bottom:4px}.ds-input{width:100%;box-sizing:border-box;padding:10px;background:#1a1a1c;color:#eee;border:1px solid #444;border-radius:6px;font-size:14px}"
+    },
+    {
+      "name": "Tool Card",
+      "kind": "card",
+      "refersTo": "tool-card",
+      "description": "Kartu alat di PDF Tools.",
+      "html": "<div class=\"ds-tool\"><span class=\"ds-tool-i\">🔗</span>Merge</div>",
+      "css": ".ds-tool{border:1px solid #333;border-radius:10px;padding:16px 10px;text-align:center;font-size:13px;color:#eee;cursor:pointer;width:140px}.ds-tool:hover{border-color:#4da3ff}.ds-tool-i{display:block;font-size:26px;margin-bottom:6px}"
+    },
+    {
+      "name": "Category Chip",
+      "kind": "chip",
+      "refersTo": "chip-tab",
+      "description": "Filter kategori PDF Tools.",
+      "html": "<span class=\"ds-chip\">Organize</span>",
+      "css": ".ds-chip{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:20px;border:1px solid #444;background:#1a1a1c;color:#ccc;font-size:13px}.ds-chip:hover{border-color:#4da3ff}"
+    },
+    {
+      "name": "Dropzone",
+      "kind": "custom",
+      "refersTo": "dropzone",
+      "description": "Area drop file dengan garis putus-putus.",
+      "html": "<div class=\"ds-drop\">Drop file di sini, atau klik untuk pilih</div>",
+      "css": ".ds-drop{border:2px dashed #555;border-radius:12px;width:320px;height:140px;display:flex;align-items:center;justify-content:center;text-align:center;color:#999;cursor:pointer;padding:10px}.ds-drop:hover{border-color:#4da3ff;color:#4da3ff}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Quiet Utility Bench",
+    "overview": "Meja kerja gelap yang tenang: satu aksen biru, kontrol terpusat, bahasa santai Indonesia. Mode Operate; kecepatan dan konsistensi di atas ekspresi.",
+    "keyCharacteristics": [
+      "Gelap sepenuhnya (#0f0f10)",
+      "Satu aksen biru (#4da3ff)",
+      "Datar, kedalaman dari garis dan lapisan tonal",
+      "Radius 6px kontrol, 10–12px wadah",
+      "Teks padat 11–14px"
+    ],
+    "rules": [
+      {
+        "name": "The One Blue Rule",
+        "body": "Biru adalah satu-satunya warna aksi.",
+        "section": "colors"
+      },
+      {
+        "name": "The Status Colors Stay Textual Rule",
+        "body": "Coral, mint, dan amber membawa status, bukan dekorasi.",
+        "section": "colors"
+      },
+      {
+        "name": "The Small Text Ceiling Rule",
+        "body": "Teks fungsional tidak lebih kecil dari 11px.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-By-Default Rule",
+        "body": "Permukaan datar saat diam; bayangan hanya untuk elemen melayang.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Solid-For-Surfaces Rule",
+        "body": "Warna terang hanya untuk teks dan garis di atas gelap; permukaan dengan teks putih memakai varian solid (>= 4,5:1).",
+        "section": "colors"
+      }
+    ],
+    "dos": [
+      "Do pakai token var(--color-*), var(--radius-*), var(--space-*) dari static/css/app.css.",
+      "Do pertahankan satu aksen biru untuk aksi utama dan state aktif.",
+      "Do beri target sentuh minimal 44×44px.",
+      "Do minta konfirmasi lewat dialog untuk aksi yang tidak bisa dibatalkan."
+    ],
+    "donts": [
+      "Don't menambah bayangan atau gradien di permukaan diam.",
+      "Don't menambah warna aksi kedua di samping biru.",
+      "Don't menulis ulang komponen yang sama per halaman dengan nilai berbeda.",
+      "Don't memakai height:100vh atau lebar piksel tetap untuk wadah konten.",
+      "Don't memakai div/span sebagai tombol tanpa role, tabindex, dan label."
+    ]
+  }
+}

@@ -6,13 +6,24 @@
 <h2>Panel Admin</h2>
 <div class="sub" id="who"></div>
 <div id="msg"></div>
-<div class="tabs">
-  <div class="tab active" data-tab="users">User</div>
-  <div class="tab" data-tab="activity">Aktivitas</div>
-  <div class="tab" data-tab="files">File aktif</div>
-  <div class="tab" data-tab="audit">Audit log</div>
+<div class="tabs" role="tablist">
+  <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="users">User</button>
+  <button type="button" class="tab" role="tab" aria-selected="false" data-tab="activity">Aktivitas</button>
+  <button type="button" class="tab" role="tab" aria-selected="false" data-tab="files">File aktif</button>
+  <button type="button" class="tab" role="tab" aria-selected="false" data-tab="audit">Audit log</button>
 </div>
-<div id="content"></div>
+<div id="content" role="tabpanel"></div>
+
+<dialog id="confirm-dlg" class="dlg" aria-labelledby="confirm-title">
+  <form method="dialog">
+    <h3 id="confirm-title"></h3>
+    <p id="confirm-body"></p>
+    <div class="dlg-actions">
+      <button type="submit" value="cancel" class="btn btn-secondary">Batal</button>
+      <button type="submit" value="ok" id="confirm-ok" class="btn btn-danger">Ya</button>
+    </div>
+  </form>
+</dialog>
 
 <script src="/static/js/admin.js"></script>
 {% endblock %}

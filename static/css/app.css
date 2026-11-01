@@ -9,10 +9,64 @@
   --color-border:#333; --color-border-strong:#444; --color-border-dashed:#555; --color-border-subtle:#2a2a2c;
   --color-shadow:rgba(0,0,0,0.4);
 
+  /* Varian solid untuk latar tombol/penanda dengan teks putih (>= 4.5:1). Warna terang
+     (--color-accent / --color-danger) tetap dipakai untuk teks dan garis di atas latar gelap. */
+  --color-accent-solid:#1f6fd6; --color-accent-solid-hover:#1b66c9;
+  --color-danger-solid:#c93434; --color-danger-solid-hover:#bf3030;
+  --color-placeholder:#9a9a9a;
+
+  /* Target sentuh minimum */
+  --touch-min:44px;
+
   /* Radius */
   --radius-xs:4px; --radius-sm:5px; --radius-md:6px; --radius-lg:8px; --radius-xl:10px;
   --radius-2xl:12px; --radius-3xl:16px; --radius-4xl:20px; --radius-full:50%;
 
   /* Spacing (nama = nilai px) */
   --space-2:2px; --space-4:4px; --space-6:6px; --space-8:8px; --space-10:10px; --space-12:12px; --space-14:14px; --space-16:16px; --space-18:18px; --space-20:20px; --space-24:24px; --space-30:30px; --space-36:36px;
+}
+
+/* ---- Dasar global ---- */
+*,*::before,*::after{box-sizing:border-box}
+button,input,select,textarea{font:inherit}
+:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
+::placeholder{color:var(--color-placeholder);opacity:1}
+input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=file]),select{min-height:var(--touch-min)}
+input[type=file]{min-height:var(--touch-min);padding:var(--space-8) 0}
+input[type=file]::file-selector-button{min-height:var(--touch-min);margin-right:var(--space-10);padding:0 var(--space-12);
+  background:var(--color-surface-raised);color:var(--color-text);border:1px solid var(--color-border-strong);
+  border-radius:var(--radius-md);font:inherit;font-size:12px;cursor:pointer}
+
+/* ---- Sistem tombol: .btn + satu varian warna + (opsional) .btn-block / .btn-sm / .btn-icon ---- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--space-6);min-height:var(--touch-min);
+  margin:0;padding:0 var(--space-16);border:1px solid transparent;border-radius:var(--radius-md);
+  font-size:14px;line-height:1.2;text-decoration:none;cursor:pointer;
+  background:var(--color-surface-raised);color:var(--color-text)}
+.btn:disabled,.btn[aria-disabled=true]{opacity:0.5;cursor:not-allowed}
+.btn-primary{background:var(--color-accent-solid);color:var(--color-white)}
+.btn-primary:hover:not(:disabled){background:var(--color-accent-solid-hover)}
+.btn-secondary{background:var(--color-surface-raised);border-color:var(--color-border-strong);color:var(--color-text)}
+.btn-secondary:hover:not(:disabled){border-color:var(--color-accent)}
+.btn-danger{background:var(--color-danger-solid);color:var(--color-white)}
+.btn-danger:hover:not(:disabled){background:var(--color-danger-solid-hover)}
+.btn-block{display:flex;width:100%}
+.btn-sm{padding:0 var(--space-12);font-size:12px}
+.btn-lg{padding:0 var(--space-20);font-size:15px}
+.btn-icon{min-width:var(--touch-min);padding:0}
+.icon-btn{display:inline-flex;align-items:center;justify-content:center;min-width:var(--touch-min);min-height:var(--touch-min);
+  padding:0;border:none;background:none;color:var(--color-text-subtle);font-size:20px;line-height:1;cursor:pointer}
+.icon-btn:hover{color:var(--color-text)}
+
+/* ---- Dialog konfirmasi ---- */
+dialog.dlg{width:min(380px,calc(100% - 32px));padding:var(--space-20);background:var(--color-surface);color:var(--color-text);
+  border:1px solid var(--color-border-strong);border-radius:var(--radius-2xl)}
+dialog.dlg::backdrop{background:rgba(0,0,0,0.6)}
+dialog.dlg h3{margin:0 0 var(--space-8);font-size:16px}
+dialog.dlg p{margin:0 0 var(--space-16);font-size:13px;line-height:1.5;color:var(--color-text-soft);overflow-wrap:anywhere}
+.dlg-actions{display:flex;justify-content:flex-end;gap:var(--space-8)}
+
+/* ---- HP (320-480px) ---- */
+@media (max-width:480px){
+  /* 16px mencegah zoom otomatis iOS Safari saat input fokus */
+  input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=file]),select,textarea{font-size:16px !important}
 }

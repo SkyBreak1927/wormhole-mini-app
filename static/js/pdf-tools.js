@@ -67,7 +67,7 @@ const pdfjsReady = window.pdfjsLib
   : new Promise(resolve => window.addEventListener('pdfjs-ready', resolve, { once: true }));
 
 const PW_TOGGLE_HTML =
-  '<button type="button" class="pw-toggle" title="Lihat/sembunyikan password">👁️</button>';
+  '<button type="button" class="pw-toggle" title="Lihat/sembunyikan password" aria-label="Lihat atau sembunyikan password" aria-pressed="false">👁️</button>';
 
 const SIMPLE_TOOLS = {
   delete: {
@@ -94,7 +94,7 @@ const SIMPLE_TOOLS = {
             '<label>Posisi watermark</label>' +
             '<div class="pos-grid">' +
               ['top-left','top-center','top-right','middle-left','center','middle-right','bottom-left','bottom-center','bottom-right']
-                .map(p => `<button type="button" class="pos-btn${p === 'center' ? ' active' : ''}" data-pos="${p}"></button>`).join('') +
+                .map(p => `<button type="button" class="pos-btn${p === 'center' ? ' active' : ''}" data-pos="${p}" aria-label="Posisi ${p}"></button>`).join('') +
             '</div>' +
             '<input type="hidden" name="position" value="center">' +
             '<label>Ukuran font</label><input type="number" name="font_size" value="40" min="8" max="200">' +
@@ -128,21 +128,21 @@ const SIMPLE_TOOLS = {
 
 const MERGE_FIELDS_HTML =
   '<label>Tambahkan file PDF (urutan menentukan hasil merge)</label>' +
-  '<div id="merge-zone">Klik atau drop file PDF di sini<input id="merge-file-input" type="file" accept="application/pdf" multiple style="display:none"></div>' +
+  '<div id="merge-zone" role="button" tabindex="0" aria-label="Pilih file PDF">Klik atau drop file PDF di sini<input id="merge-file-input" type="file" accept="application/pdf" multiple style="display:none"></div>' +
   '<div id="merge-file-list"></div>';
 
 const ROTATE_FIELDS_HTML =
   '<label>Pilih file PDF, lalu klik ikon ↻ di tiap halaman untuk memutar</label>' +
-  '<div id="rotate-zone">Klik atau drop file PDF di sini<input id="rotate-file-input" type="file" accept="application/pdf" style="display:none"></div>' +
+  '<div id="rotate-zone" role="button" tabindex="0" aria-label="Pilih file PDF">Klik atau drop file PDF di sini<input id="rotate-file-input" type="file" accept="application/pdf" style="display:none"></div>' +
   '<div id="rotate-thumbs"></div>';
 
 const SPLIT_FIELDS_HTML =
   '<label>Pilih file PDF, lalu klik halaman yang mau diambil</label>' +
-  '<div id="split-zone">Klik atau drop file PDF di sini<input id="split-file-input" type="file" accept="application/pdf" style="display:none"></div>' +
+  '<div id="split-zone" role="button" tabindex="0" aria-label="Pilih file PDF">Klik atau drop file PDF di sini<input id="split-file-input" type="file" accept="application/pdf" style="display:none"></div>' +
   '<div id="split-thumbs"></div>' +
   '<div id="split-actions" style="display:none">' +
-    '<button type="button" id="split-select-all">Pilih Semua</button>' +
-    '<button type="button" id="split-clear">Kosongkan</button>' +
+    '<button type="button" id="split-select-all" class="btn btn-secondary btn-sm">Pilih Semua</button>' +
+    '<button type="button" id="split-clear" class="btn btn-secondary btn-sm">Kosongkan</button>' +
   '</div>' +
   '<p id="split-count"></p>' +
   '<div id="split-manual" style="display:none">' +
@@ -152,12 +152,11 @@ const SPLIT_FIELDS_HTML =
 
 const EDIT_TEXT_FIELDS_HTML =
   '<label>Pilih file PDF, lalu klik paragraf yang mau diedit</label>' +
-  '<div id="edit-zone">Klik atau drop file PDF di sini<input id="edit-file-input" type="file" accept="application/pdf" style="display:none"></div>' +
+  '<div id="edit-zone" role="button" tabindex="0" aria-label="Pilih file PDF">Klik atau drop file PDF di sini<input id="edit-file-input" type="file" accept="application/pdf" style="display:none"></div>' +
   '<div id="edit-password-block" style="display:none">' +
     '<label>Password PDF (file ini terkunci)</label>' +
     '<div class="pw-wrap"><input type="password" id="edit-password">' + PW_TOGGLE_HTML + '</div>' +
-    '<button type="button" id="edit-password-retry" style="margin-top:6px;padding:6px 14px;background:#222;' +
-      'border:1px solid #444;border-radius:5px;color:#eee;cursor:pointer;font-size:12px">Coba Lagi</button>' +
+    '<button type="button" id="edit-password-retry" class="btn btn-secondary btn-sm">Coba Lagi</button>' +
   '</div>' +
   '<p id="edit-load-status" style="font-size:12px;margin-top:8px"></p>' +
   '<div id="edit-page-nav" style="display:none;margin-top:10px"></div>' +
@@ -200,9 +199,9 @@ function renderMergeList() {
   listEl.innerHTML = mergeFiles.map((f, i) => `
     <div class="merge-item">
       <span class="mname">${i + 1}. ${f.name}</span>
-      <button type="button" data-action="up" data-idx="${i}" ${i === 0 ? 'disabled' : ''}>↑</button>
-      <button type="button" data-action="down" data-idx="${i}" ${i === mergeFiles.length - 1 ? 'disabled' : ''}>↓</button>
-      <button type="button" class="mremove" data-action="remove" data-idx="${i}">✕</button>
+      <button type="button" class="btn btn-secondary btn-icon" aria-label="Naikkan" data-action="up" data-idx="${i}" ${i === 0 ? 'disabled' : ''}>↑</button>
+      <button type="button" class="btn btn-secondary btn-icon" aria-label="Turunkan" data-action="down" data-idx="${i}" ${i === mergeFiles.length - 1 ? 'disabled' : ''}>↓</button>
+      <button type="button" class="btn btn-secondary btn-icon mremove" aria-label="Hapus dari daftar" data-action="remove" data-idx="${i}">✕</button>
     </div>
   `).join('');
 
@@ -287,6 +286,7 @@ async function loadRotateFile(file) {
       btn.type = 'button';
       btn.className = 'rotate-thumb-btn';
       btn.title = 'Putar 90°';
+      btn.setAttribute('aria-label', 'Putar halaman ' + i + ' sebesar 90 derajat');
       btn.textContent = '↻';
       btn.onclick = () => {
         const idx = parseInt(wrap.dataset.page);
@@ -372,6 +372,10 @@ async function loadSplitFile(file) {
       const wrap = document.createElement('div');
       wrap.className = 'split-thumb';
       wrap.dataset.page = String(i - 1);
+      wrap.setAttribute('role', 'button');
+      wrap.tabIndex = 0;
+      wrap.setAttribute('aria-pressed', 'false');
+      wrap.setAttribute('aria-label', 'Pilih halaman ' + i);
       wrap.appendChild(canvas);
 
       const label = document.createElement('div');
@@ -388,6 +392,7 @@ async function loadSplitFile(file) {
           selectedPages[idx] = true;
           wrap.classList.add('selected');
         }
+        wrap.setAttribute('aria-pressed', String(!!selectedPages[idx]));
         updateSplitCount();
       };
 
@@ -429,12 +434,13 @@ function setupSplitZone() {
     document.querySelectorAll('.split-thumb').forEach(wrap => {
       selectedPages[parseInt(wrap.dataset.page)] = true;
       wrap.classList.add('selected');
+      wrap.setAttribute('aria-pressed', 'true');
     });
     updateSplitCount();
   };
   document.getElementById('split-clear').onclick = () => {
     selectedPages = {};
-    document.querySelectorAll('.split-thumb').forEach(wrap => wrap.classList.remove('selected'));
+    document.querySelectorAll('.split-thumb').forEach(wrap => { wrap.classList.remove('selected'); wrap.setAttribute('aria-pressed', 'false'); });
     updateSplitCount();
   };
 }
@@ -798,6 +804,7 @@ formFields.addEventListener('click', (e) => {
     input.type = 'password';
     btn.style.opacity = '1';
   }
+  btn.setAttribute('aria-pressed', input.type === 'password' ? 'false' : 'true');
 });
 
 function updateProgress(percent, label) {

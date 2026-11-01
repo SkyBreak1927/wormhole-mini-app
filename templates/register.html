@@ -12,15 +12,15 @@
     <label>Password</label>
     <div class="pw-wrap">
       <input type="password" id="reg-password" placeholder="Min. 6 karakter">
-      <button type="button" class="pw-toggle" data-target="reg-password" title="Lihat/sembunyikan password">👁️</button>
+      <button type="button" class="pw-toggle" data-target="reg-password" title="Lihat/sembunyikan password" aria-label="Lihat atau sembunyikan password" aria-pressed="false">👁️</button>
     </div>
-    <button id="btn-register">Daftar</button>
+    <button id="btn-register" class="btn btn-primary btn-block">Daftar</button>
   </div>
 
   <div id="step-verify" class="step">
     <label>Kode verifikasi (cek email kamu)</label>
     <input type="text" id="verify-code" placeholder="Kode dari email" maxlength="12">
-    <button id="btn-verify">Verifikasi</button>
+    <button id="btn-verify" class="btn btn-primary btn-block">Verifikasi</button>
   </div>
 
   <div id="status"></div>
