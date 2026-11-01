@@ -31,13 +31,21 @@ supabase: Client = (
 )
 
 
+def trust_cloudflare() -> bool:
+    """CF-Connecting-IP hanya boleh dipercaya kalau SEMUA traffic memang lewat Cloudflare.
+    Selama domain Railway (*.up.railway.app) masih bisa diakses langsung, klien bisa memalsukan
+    header itu. Set TRUST_CLOUDFLARE=1 di Railway hanya setelah domain dipindah ke Cloudflare."""
+    return os.environ.get("TRUST_CLOUDFLARE", "").strip().lower() in ("1", "true", "yes")
+
+
 def client_ip(request: Request) -> str:
-    """IP pengunjung: CF-Connecting-IP kalau lewat Cloudflare; kalau tidak, entri paling kanan
-    X-Forwarded-For (yang ditambahkan proxy terdekat, jadi tidak bisa dipalsukan klien);
-    terakhir alamat koneksi langsung."""
-    cf = request.headers.get("cf-connecting-ip")
-    if cf and cf.strip():
-        return cf.strip()
+    """IP pengunjung. TRUST_CLOUDFLARE=1: CF-Connecting-IP. Selain itu header itu DIABAIKAN dan
+    dipakai entri paling kanan X-Forwarded-For (ditambahkan proxy terdekat, jadi tidak bisa
+    dipalsukan klien); terakhir alamat koneksi langsung."""
+    if trust_cloudflare():
+        cf = request.headers.get("cf-connecting-ip")
+        if cf and cf.strip():
+            return cf.strip()
     xff = request.headers.get("x-forwarded-for")
     if xff and xff.split(",")[-1].strip():
         return xff.split(",")[-1].strip()

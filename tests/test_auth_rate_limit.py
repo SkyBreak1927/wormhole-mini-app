@@ -53,6 +53,7 @@ class FakeAuth:
 def env(monkeypatch):
     clock = FakeClock()
     fake = FakeAuth()
+    monkeypatch.delenv("TRUST_CLOUDFLARE", raising=False)  # default tidak aktif, apa pun isi lingkungan
     monkeypatch.setattr(auth, "time", clock)
     monkeypatch.setattr(auth, "supabase", SimpleNamespace(auth=fake))
     auth.email_send_log.clear()
@@ -138,13 +139,53 @@ def test_maksimal_10_kali_per_jam_per_ip(env):
     assert forgot(env, "user10@mail.com").status_code == 200
 
 
-def test_ip_memakai_cf_connecting_ip_bila_ada(env):
+def test_ip_memakai_cf_connecting_ip_hanya_bila_trust_cloudflare_aktif(env, monkeypatch):
+    monkeypatch.setenv("TRUST_CLOUDFLARE", "1")
     for i in range(10):
         assert forgot(env, f"a{i}@mail.com", {"CF-Connecting-IP": "1.1.1.1"}).status_code == 200
     assert forgot(env, "a10@mail.com", {"CF-Connecting-IP": "1.1.1.1"}).status_code == 429
     # IP Cloudflare lain tidak ikut terblokir, dan IP koneksi langsung (testclient) juga bebas
     assert forgot(env, "b0@mail.com", {"CF-Connecting-IP": "2.2.2.2"}).status_code == 200
     assert forgot(env, "c0@mail.com").status_code == 200
+
+
+@pytest.mark.parametrize("nilai", [None, "", "0", "false"])
+def test_tanpa_trust_cloudflare_cf_connecting_ip_palsu_tidak_mengubah_ip(env, monkeypatch, nilai):
+    """Penyerang memutar CF-Connecting-IP palsu untuk lolos dari batas per IP: tidak boleh berhasil."""
+    if nilai is None:
+        monkeypatch.delenv("TRUST_CLOUDFLARE", raising=False)
+    else:
+        monkeypatch.setenv("TRUST_CLOUDFLARE", nilai)
+    xff = {"X-Forwarded-For": "7.7.7.7"}
+    for i in range(10):
+        r = forgot(env, f"a{i}@mail.com", {**xff, "CF-Connecting-IP": f"66.66.66.{i}"})
+        assert r.status_code == 200
+    r = forgot(env, "a10@mail.com", {**xff, "CF-Connecting-IP": "66.66.66.200"})
+    assert r.status_code == 429 and r.json()["detail"] == MSG, "request ke-11 dari XFF yang sama harus 429"
+    assert set(auth.ip_send_log) == {"7.7.7.7"}, "yang dihitung tetap IP dari X-Forwarded-For"
+
+
+def test_tanpa_trust_cloudflare_dan_tanpa_xff_header_cf_juga_diabaikan(env, monkeypatch):
+    monkeypatch.delenv("TRUST_CLOUDFLARE", raising=False)
+    for i in range(10):
+        assert forgot(env, f"a{i}@mail.com", {"CF-Connecting-IP": f"66.66.66.{i}"}).status_code == 200
+    assert forgot(env, "a10@mail.com", {"CF-Connecting-IP": "66.66.66.99"}).status_code == 429
+    assert set(auth.ip_send_log) == {"testclient"}
+
+
+def test_dengan_trust_cloudflare_xff_diabaikan_dan_cf_dipakai(env, monkeypatch):
+    monkeypatch.setenv("TRUST_CLOUDFLARE", "1")
+    hdr = lambda i: {"CF-Connecting-IP": "1.2.3.4", "X-Forwarded-For": f"9.9.9.{i}"}
+    for i in range(10):
+        assert forgot(env, f"a{i}@mail.com", hdr(i)).status_code == 200
+    assert forgot(env, "a10@mail.com", hdr(77)).status_code == 429
+    assert set(auth.ip_send_log) == {"1.2.3.4"}
+
+
+def test_trust_cloudflare_aktif_tapi_header_tidak_ada_jatuh_ke_xff(env, monkeypatch):
+    monkeypatch.setenv("TRUST_CLOUDFLARE", "1")
+    assert forgot(env, "a@mail.com", {"X-Forwarded-For": "4.4.4.4"}).status_code == 200
+    assert set(auth.ip_send_log) == {"4.4.4.4"}
 
 
 def test_ip_memakai_x_forwarded_for_paling_kanan_bila_tanpa_cloudflare(env):
@@ -154,7 +195,8 @@ def test_ip_memakai_x_forwarded_for_paling_kanan_bila_tanpa_cloudflare(env):
     assert forgot(env, "a10@mail.com", {"X-Forwarded-For": "8.8.8.8, 3.3.3.3"}).status_code == 429
 
 
-def test_tanpa_header_memakai_alamat_koneksi(env):
+def test_tanpa_header_memakai_alamat_koneksi(env, monkeypatch):
+    monkeypatch.delenv("TRUST_CLOUDFLARE", raising=False)
     assert auth.client_ip(SimpleNamespace(headers={}, client=SimpleNamespace(host="10.0.0.5"))) == "10.0.0.5"
     assert auth.client_ip(SimpleNamespace(headers={}, client=None)) == "unknown"
 
@@ -181,8 +223,8 @@ def test_password_pendek_ditolak_tanpa_memakai_jatah(env):
 def test_log_dibersihkan_dari_kunci_kedaluwarsa(env, monkeypatch):
     monkeypatch.setattr(auth, "SWEEP_THRESHOLD", 3)
     for i in range(4):
-        forgot(env, f"x{i}@mail.com", {"CF-Connecting-IP": f"5.5.5.{i}"})
+        forgot(env, f"x{i}@mail.com", {"X-Forwarded-For": f"5.5.5.{i}"})
     env.clock.advance(3700)
-    forgot(env, "baru@mail.com", {"CF-Connecting-IP": "6.6.6.6"})
+    forgot(env, "baru@mail.com", {"X-Forwarded-For": "6.6.6.6"})
     assert set(auth.email_send_log) == {"baru@mail.com"}
     assert set(auth.ip_send_log) == {"6.6.6.6"}
