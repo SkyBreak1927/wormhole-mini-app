@@ -63,9 +63,14 @@ resendBtn.addEventListener('click', async () => {
     await postJSON('/auth/resend-verification', {email: pendingEmail}, 'Gagal mengirim ulang kode. Coba lagi.');
     setStatus('Kode baru sudah dikirim ke ' + pendingEmail + '. Cek folder spam kalau belum sampai.', false);
   } catch (err) {
-    clearInterval(resendBtn._cooldown);
-    resendBtn.disabled = false;
-    resendBtn.textContent = RESEND_LABEL;
+    if (err.status === 429) {
+      // kena batas server: tahan tombol selama waktu yang diminta server (atau default)
+      startCooldown(resendBtn, err.retryAfter || RESEND_COOLDOWN, RESEND_LABEL);
+    } else {
+      clearInterval(resendBtn._cooldown);
+      resendBtn.disabled = false;
+      resendBtn.textContent = RESEND_LABEL;
+    }
     setStatus(err.message, true);
   }
 });

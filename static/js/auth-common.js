@@ -15,7 +15,7 @@ const MSG_FORM = 'Data belum lengkap atau formatnya belum benar. Periksa lagi is
 // Pesan dari server yang sudah berbahasa Indonesia dipakai apa adanya; pesan teknis berbahasa
 // Inggris (mis. dari Supabase) diganti kalimat yang bisa dipahami.
 function humanizeDetail(status, detail, fallback) {
-  if (status === 429) return MSG_BUSY;
+  if (status === 429) return (typeof detail === 'string' && detail.trim()) ? detail : MSG_BUSY;
   if (status >= 500) return MSG_SERVER;
   if (Array.isArray(detail)) return MSG_FORM;
   if (typeof detail !== 'string' || !detail.trim()) return fallback;
@@ -37,7 +37,10 @@ async function postJSON(url, payload, fallback) {
   let data = null;
   try { data = await res.json(); } catch (e) { data = null; }
   if (res.ok) return data || {};
-  throw new Error(humanizeDetail(res.status, data && data.detail, fallback));
+  const err = new Error(humanizeDetail(res.status, data && data.detail, fallback));
+  err.status = res.status;
+  err.retryAfter = parseInt(res.headers.get('Retry-After'), 10) || 0;
+  throw err;
 }
 
 // Hitung mundur pada tombol kirim ulang; tombol aktif lagi saat habis.
@@ -46,7 +49,7 @@ function startCooldown(btn, seconds, label) {
   let left = seconds;
   btn.disabled = true;
   const tick = () => {
-    btn.textContent = left > 0 ? label + ' (' + left + ' dtk)' : label;
+    btn.textContent = left > 0 ? label + ' (' + (left > 90 ? Math.ceil(left / 60) + ' mnt' : left + ' dtk') + ')' : label;
     if (left <= 0) { clearInterval(btn._cooldown); btn.disabled = false; }
     left--;
   };

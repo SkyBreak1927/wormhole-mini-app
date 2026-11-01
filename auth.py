@@ -1,4 +1,5 @@
-import os
+import math, os, time
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Header, Depends, Request
 from pydantic import BaseModel
@@ -12,9 +13,70 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY")
 SESSION_DURATION_DAYS = 7
 
+# --- Rate limit endpoint yang mengirim email (register, kirim ulang verifikasi, lupa password) ---
+# Disimpan di memori (reset saat deploy). Pola sama dengan check_pdf_rate_limit di pdf_tools.py.
+# Batas per email dihitung gabungan lintas endpoint, supaya satu alamat tidak bisa dibanjiri
+# lewat tiga pintu berbeda. Request yang ditolak tidak dicatat, jadi tidak memperpanjang hukuman.
+EMAIL_SEND_COOLDOWN = 60        # detik: maks 1 kali per email per 60 detik
+EMAIL_SEND_HOURLY_MAX = 5       # maks 5 kali per email per jam
+IP_SEND_HOURLY_MAX = 10         # maks 10 kali per IP per jam
+SEND_WINDOW = 3600              # detik
+RATE_LIMIT_MESSAGE = "Terlalu sering. Coba lagi dalam beberapa menit."
+SWEEP_THRESHOLD = 5000          # bersihkan kunci kedaluwarsa kalau log melebihi ini
+email_send_log = defaultdict(list)   # email (lowercase) -> [timestamp]
+ip_send_log = defaultdict(list)      # ip -> [timestamp]
+
 supabase: Client = (
     create_client(SUPABASE_URL, SUPABASE_ANON_KEY) if SUPABASE_URL and SUPABASE_ANON_KEY else None
 )
+
+
+def client_ip(request: Request) -> str:
+    """IP pengunjung: CF-Connecting-IP kalau lewat Cloudflare; kalau tidak, entri paling kanan
+    X-Forwarded-For (yang ditambahkan proxy terdekat, jadi tidak bisa dipalsukan klien);
+    terakhir alamat koneksi langsung."""
+    cf = request.headers.get("cf-connecting-ip")
+    if cf and cf.strip():
+        return cf.strip()
+    xff = request.headers.get("x-forwarded-for")
+    if xff and xff.split(",")[-1].strip():
+        return xff.split(",")[-1].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _recent(log: dict, key: str, now: float) -> list:
+    hits = [t for t in log[key] if now - t < SEND_WINDOW]
+    if hits:
+        log[key] = hits
+    else:
+        log.pop(key, None)
+    return hits
+
+
+def check_email_send_limit(request: Request, email: str):
+    """Panggil sebelum mengirim email. Melempar 429 kalau kena batas; kalau lolos, mencatat percobaan.
+    Berlaku sama untuk email terdaftar maupun tidak, jadi tidak membocorkan status akun."""
+    now = time.time()
+    key = (email or "").strip().lower()
+    ip = client_ip(request)
+    if len(email_send_log) + len(ip_send_log) > SWEEP_THRESHOLD:
+        for log in (email_send_log, ip_send_log):
+            for k in list(log):
+                _recent(log, k, now)
+
+    ip_hits = _recent(ip_send_log, ip, now)
+    mail_hits = _recent(email_send_log, key, now)
+    if len(ip_hits) >= IP_SEND_HOURLY_MAX:
+        wait = ip_hits[0] + SEND_WINDOW - now
+    elif mail_hits and now - mail_hits[-1] < EMAIL_SEND_COOLDOWN:
+        wait = mail_hits[-1] + EMAIL_SEND_COOLDOWN - now
+    elif len(mail_hits) >= EMAIL_SEND_HOURLY_MAX:
+        wait = mail_hits[0] + SEND_WINDOW - now
+    else:
+        email_send_log[key].append(now)
+        ip_send_log[ip].append(now)
+        return
+    raise HTTPException(status_code=429, detail=RATE_LIMIT_MESSAGE, headers={"Retry-After": str(max(1, math.ceil(wait)))})
 
 
 class RegisterRequest(BaseModel):
@@ -48,10 +110,11 @@ def require_supabase():
 
 
 @router.post("/auth/register")
-async def register(body: RegisterRequest):
+async def register(body: RegisterRequest, request: Request):
     require_supabase()
     if len(body.password) < 6:
         raise HTTPException(status_code=400, detail="Password minimal 6 karakter.")
+    check_email_send_limit(request, body.email)
     try:
         result = supabase.auth.sign_up({"email": body.email, "password": body.password})
     except Exception as e:
@@ -74,8 +137,9 @@ class ResendRequest(BaseModel):
 
 
 @router.post("/auth/resend-verification")
-async def resend_verification(body: ResendRequest):
+async def resend_verification(body: ResendRequest, request: Request):
     require_supabase()
+    check_email_send_limit(request, body.email)
     try:
         supabase.auth.resend({"type": "signup", "email": body.email})
     except Exception:
@@ -268,8 +332,9 @@ async def logout(body: LogoutRequest, authorization: str = Header(None)):
 
 
 @router.post("/auth/forgot-password")
-async def forgot_password(body: ForgotPasswordRequest):
+async def forgot_password(body: ForgotPasswordRequest, request: Request):
     require_supabase()
+    check_email_send_limit(request, body.email)
     try:
         supabase.auth.reset_password_for_email(body.email)
     except Exception:
