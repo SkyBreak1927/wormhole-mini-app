@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Laporan Bug · wormhole-mini{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/admin-reports.css">{% endblock %}
+{% block body %}
+<h2>🐛 Laporan Bug ({{ total }})</h2>
+{% for r in reports %}
+<div class="report">
+  <div class="report-time">{{ r.ts }}</div>
+  <div class="report-desc">{{ r.description }}</div>
+  {% if r.img_url %}<a href="{{ r.img_url }}" target="_blank"><img class="report-img" src="{{ r.img_url }}"></a>{% endif %}
+</div>
+{% else %}
+<p class="empty">Belum ada laporan.</p>
+{% endfor %}
+{% endblock %}

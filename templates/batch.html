@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Batch · wormhole-mini{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/batch.css">{% endblock %}
+{% block body %}
+<h3>📦 {{ items|length }} file dibagikan</h3>
+{% for item in items %}
+{% if item.available %}
+<div class="row">
+  <span>{{ item.filename }}{% if item.remaining_min is not none %}<span class="row-note"> ({{ item.remaining_min }}m lagi)</span>{% endif %}</span>
+  <a href="{{ item.url }}"><button>Download</button></a>
+</div>
+{% else %}
+<div class="row done">
+  <span>{{ item.filename }}</span>
+  <span class="done-label">✓ tidak tersedia lagi</span>
+</div>
+{% endif %}
+{% endfor %}
+<p class="note">Tiap file hanya bisa diunduh sekali.</p>
+{% endblock %}

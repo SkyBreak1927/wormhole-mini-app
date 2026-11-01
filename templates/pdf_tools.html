@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}PDF Tools · wormhole-mini{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/pdf-tools.css">{% endblock %}
+{% block body %}
+<a href="/" class="back-link">← Kembali</a>
+<div id="user-bar">
+  <span id="user-email-display"></span>
+  <button id="logout-btn">Logout</button>
+</div>
+<h2>🛠️ PDF Tools</h2>
+<div class="cat-tabs">
+  <div class="cat-tab active" data-cat="all">Semua</div>
+  <div class="cat-tab" data-cat="organize">Organize</div>
+  <div class="cat-tab" data-cat="optimize">Optimize</div>
+  <div class="cat-tab" data-cat="convert">Convert</div>
+  <div class="cat-tab" data-cat="security">Security</div>
+  <div class="cat-tab" data-cat="edit">Edit</div>
+</div>
+<div class="tool-grid">
+  <div class="tool-card" data-tool="merge" data-cat="organize"><span class="tool-icon">🔗</span>Merge</div>
+  <div class="tool-card" data-tool="split" data-cat="organize"><span class="tool-icon">✂️</span>Split / Extract</div>
+  <div class="tool-card" data-tool="rotate" data-cat="organize"><span class="tool-icon">🔄</span>Rotate</div>
+  <div class="tool-card" data-tool="delete" data-cat="organize"><span class="tool-icon">🗑️</span>Hapus Halaman</div>
+  <div class="tool-card" data-tool="compress" data-cat="optimize"><span class="tool-icon">🗜️</span>Compress</div>
+  <div class="tool-card" data-tool="pdf-to-jpg" data-cat="convert"><span class="tool-icon">🖼️</span>PDF ke JPG</div>
+  <div class="tool-card" data-tool="jpg-to-pdf" data-cat="convert"><span class="tool-icon">📄</span>JPG ke PDF</div>
+  <div class="tool-card" data-tool="pdf-to-word" data-cat="convert"><span class="tool-icon">📝</span>PDF ke Word</div>
+  <div class="tool-card" data-tool="protect" data-cat="security"><span class="tool-icon">🔒</span>Protect</div>
+  <div class="tool-card" data-tool="unlock" data-cat="security"><span class="tool-icon">🔓</span>Unlock</div>
+  <div class="tool-card" data-tool="watermark" data-cat="edit"><span class="tool-icon">💧</span>Watermark</div>
+  <div class="tool-card" data-tool="edit-text" data-cat="edit"><span class="tool-icon">✏️</span>Edit Teks</div>
+</div>
+
+<div id="tool-form">
+  <div id="form-fields"></div>
+  <div id="tool-progress-container">
+    <div id="tool-progress-bar-bg"><div id="tool-progress-bar"></div></div>
+    <div id="tool-progress-text">0%</div>
+  </div>
+  <button id="tool-submit">Proses & Download</button>
+  <div id="tool-status"></div>
+</div>
+
+<script type="module" src="/static/js/pdf-tools-module.js"></script>
+
+<script src="/static/js/pdf-tools.js"></script>
+{% endblock %}

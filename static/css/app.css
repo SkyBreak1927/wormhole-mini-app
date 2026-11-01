@@ -1,0 +1,18 @@
+/* Design tokens bersama. Dimuat di semua halaman sebelum CSS per-halaman. */
+:root{
+  /* Warna */
+  --color-bg:#0f0f10; --color-surface:#1a1a1c; --color-surface-raised:#222;
+  --color-text:#eee; --color-text-soft:#ccc; --color-text-subtle:#999; --color-text-dim:#aaa; --color-text-muted:#888;
+  --color-white:#fff;
+  --color-accent:#4da3ff; --color-accent-hover:#6db4ff; --color-accent-muted:#2a3a4a;
+  --color-danger:#ff6b6b; --color-success:#4dff88; --color-warning:#e0b040;
+  --color-border:#333; --color-border-strong:#444; --color-border-dashed:#555; --color-border-subtle:#2a2a2c;
+  --color-shadow:rgba(0,0,0,0.4);
+
+  /* Radius */
+  --radius-xs:4px; --radius-sm:5px; --radius-md:6px; --radius-lg:8px; --radius-xl:10px;
+  --radius-2xl:12px; --radius-3xl:16px; --radius-4xl:20px; --radius-full:50%;
+
+  /* Spacing (nama = nilai px) */
+  --space-2:2px; --space-4:4px; --space-6:6px; --space-8:8px; --space-10:10px; --space-12:12px; --space-14:14px; --space-16:16px; --space-18:18px; --space-20:20px; --space-24:24px; --space-30:30px; --space-36:36px;
+}

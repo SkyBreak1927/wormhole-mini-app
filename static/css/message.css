@@ -1,0 +1,2 @@
+/* Quirks mode dulu mengabaikan margin atas elemen pertama di body; pertahankan tampilan itu. */
+h3{margin-top:0}
