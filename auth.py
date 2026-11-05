@@ -360,7 +360,7 @@ async def reset_password(body: ResetPasswordRequest):
     # tidak tercampur kalau ada beberapa orang reset password bersamaan
     scoped_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
     try:
-        scoped_client.auth.verify_otp({"email": body.email, "token": body.code, "type": "recovery"})
+        verified = scoped_client.auth.verify_otp({"email": body.email, "token": body.code, "type": "recovery"})
     except Exception as e:
         print(f"[reset-password] verify_otp gagal: {type(e).__name__}: {e}", flush=True)
         raise HTTPException(
@@ -389,4 +389,17 @@ async def reset_password(body: ResetPasswordRequest):
             status_code=400,
             detail="Kode valid tetapi password gagal diubah. Minta kode baru lalu coba lagi.",
         )
+
+    # Kode email sudah membuktikan kepemilikan akun, jadi langsung masuk dengan sesi yang
+    # sama seperti /auth/login. Kalau sesi tidak tersedia, frontend jatuh ke halaman masuk.
+    session = getattr(verified, "session", None)
+    user = getattr(verified, "user", None)
+    if session and user:
+        set_session_expiry(user.id)
+        return {
+            "message": "Password berhasil diubah.",
+            "access_token": session.access_token,
+            "refresh_token": session.refresh_token,
+            "user_id": user.id,
+        }
     return {"message": "Password berhasil diubah, silakan masuk dengan password baru."}

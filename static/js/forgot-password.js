@@ -47,9 +47,18 @@ document.getElementById('step-reset').addEventListener('submit', async (e) => {
   setStatus('Memproses...', false);
 
   try {
-    await postJSON('/auth/reset-password', {email: pendingEmail, code, new_password: newPassword}, 'Gagal mengganti password. Coba lagi.');
-    setStatus('Password berhasil diubah! Mengalihkan ke halaman masuk...', false);
-    setTimeout(() => { window.location.href = '/login'; }, 1500);
+    const data = await postJSON('/auth/reset-password', {email: pendingEmail, code, new_password: newPassword}, 'Gagal mengganti password. Coba lagi.');
+    if (data && data.access_token) {
+      localStorage.setItem('access_token', data.access_token);
+      localStorage.setItem('refresh_token', data.refresh_token);
+      localStorage.setItem('user_id', data.user_id);
+      localStorage.setItem('user_email', pendingEmail);
+      setStatus('Password berhasil diubah! Mengalihkan ke halaman utama...', false);
+      setTimeout(() => { window.location.href = '/'; }, 1000);
+    } else {
+      setStatus('Password berhasil diubah! Mengalihkan ke halaman masuk...', false);
+      setTimeout(() => { window.location.href = '/login'; }, 1500);
+    }
   } catch (err) {
     setStatus(err.message, true);
     btn.disabled = false;
