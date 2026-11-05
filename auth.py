@@ -361,7 +361,32 @@ async def reset_password(body: ResetPasswordRequest):
     scoped_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
     try:
         scoped_client.auth.verify_otp({"email": body.email, "token": body.code, "type": "recovery"})
+    except Exception as e:
+        print(f"[reset-password] verify_otp gagal: {type(e).__name__}: {e}", flush=True)
+        raise HTTPException(
+            status_code=400,
+            detail="Kode salah atau sudah kedaluwarsa. Setiap kode hanya bisa dipakai sekali; klik Kirim ulang kode untuk minta yang baru.",
+        )
+
+    # Kode sudah valid dan terpakai di titik ini. Kalau update password gagal, kode lama
+    # tidak bisa dipakai lagi, jadi pesannya harus jelas supaya user tidak mengira kodenya salah.
+    try:
         scoped_client.auth.update_user({"password": body.new_password})
-    except Exception:
-        raise HTTPException(status_code=400, detail="Kode salah, sudah kedaluwarsa, atau gagal mengubah password.")
+    except Exception as e:
+        print(f"[reset-password] update_user gagal: {type(e).__name__}: {e}", flush=True)
+        msg = str(e).lower()
+        if "same_password" in msg or "different from the old password" in msg:
+            raise HTTPException(
+                status_code=400,
+                detail="Password baru sama dengan password lama. Kalau kamu ingat password itu, langsung masuk saja dengan password tersebut, atau minta kode baru dan pakai password yang berbeda.",
+            )
+        if "weak_password" in msg or "password should" in msg:
+            raise HTTPException(
+                status_code=400,
+                detail="Password terlalu lemah. Coba kombinasi yang lebih panjang, lalu minta kode baru.",
+            )
+        raise HTTPException(
+            status_code=400,
+            detail="Kode valid tetapi password gagal diubah. Minta kode baru lalu coba lagi.",
+        )
     return {"message": "Password berhasil diubah, silakan masuk dengan password baru."}
