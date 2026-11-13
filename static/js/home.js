@@ -85,6 +85,28 @@ drop.ondragleave = () => drop.classList.remove('hover');
 drop.ondrop = e => { e.preventDefault(); drop.classList.remove('hover'); handleFiles(e.dataTransfer.files); };
 fileInput.onchange = () => handleFiles(fileInput.files);
 
+// Tempel (Ctrl+V/Cmd+V) file atau gambar yang sudah dicopy, langsung upload lewat jalur yang sama.
+// Diabaikan kalau user sedang ngetik di input/textarea lain (misal kotak lapor bug) dan clipboard-nya cuma teks.
+document.addEventListener('paste', e => {
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+
+  const files = [];
+  for (const item of items) {
+    if (item.kind === 'file') {
+      const f = item.getAsFile();
+      if (f) files.push(f);
+    }
+  }
+  if (files.length === 0) return;
+
+  const activeTag = document.activeElement && document.activeElement.tagName;
+  if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
+
+  e.preventDefault();
+  handleFiles(files);
+});
+
 function showResult(link) {
   document.getElementById('result').innerHTML =
     `<p>Link:</p><input type="text" value="${link}" readonly onclick="this.select()">
