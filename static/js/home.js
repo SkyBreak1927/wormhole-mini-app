@@ -85,6 +85,17 @@ drop.ondragleave = () => drop.classList.remove('hover');
 drop.ondrop = e => { e.preventDefault(); drop.classList.remove('hover'); handleFiles(e.dataTransfer.files); };
 fileInput.onchange = () => handleFiles(fileInput.files);
 
+// Klik di elemen non-teks (kotak drop, tombol bantuan, dll) bikin browser mindahin fokus ke
+// elemen itu — begitu fokusnya bukan di body/input/textarea, event 'paste' sering nggak kebaca
+// sama sekali walau user udah pencet Ctrl+V. Jadi balikin fokus ke halaman tiap kali klik di luar
+// elemen yang memang butuh diketik, biar paste selalu nyampe ke listener di bawah.
+document.addEventListener('click', e => {
+  const el = document.activeElement;
+  const tag = el && el.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el && el.isContentEditable)) return;
+  if (el && el.blur) el.blur();
+});
+
 // Tempel (Ctrl+V/Cmd+V) file atau gambar yang sudah dicopy, langsung upload lewat jalur yang sama.
 // Diabaikan kalau user sedang ngetik di input/textarea lain (misal kotak lapor bug) dan clipboard-nya cuma teks.
 document.addEventListener('paste', e => {
